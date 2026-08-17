@@ -605,7 +605,14 @@ class DocumentService:
                 for task_id, task_info in _UPLOAD_TASKS.items()
             }
 
-    def clear_finished_tasks(self, keep_last: int = 3):
+    def clear_finished_tasks(
+        self,
+        keep_last: int = 3,
+        *,
+        preserve_task_id: str | None = None,
+    ):
+        """清理旧终态任务，但绝不影响当前轮询或仍由 Future 执行的任务。"""
+        keep_last = max(0, keep_last)
         with _UPLOAD_TASKS_LOCK:
             done_ids = [
                 task_id
@@ -618,13 +625,25 @@ class DocumentService:
                     "updated_at", 0
                 )
             )
-            to_remove = (
-                done_ids[:-keep_last]
-                if keep_last and len(done_ids) > keep_last
-                else []
-            )
-            for task_id in to_remove:
+            protected_task_ids = {
+                task_id
+                for task_id, future in _UPLOAD_FUTURES.items()
+                if not future.done()
+            }
+            if preserve_task_id:
+                protected_task_ids.add(preserve_task_id)
+
+            # 终态快照可能在 worker 写入最终状态后、Future 回调移除前短暂
+            # 同时存在于 _UPLOAD_FUTURES。此时仍视为活跃任务，不能为满足
+            # 历史数量限制而删除；被本次 GET 查询的任务同样必须能返回。
+            excess = max(0, len(done_ids) - keep_last)
+            for task_id in done_ids:
+                if excess == 0:
+                    break
+                if task_id in protected_task_ids:
+                    continue
                 _UPLOAD_TASKS.pop(task_id, None)
+                excess -= 1
 
     def list_documents(self):
         return list_documents()

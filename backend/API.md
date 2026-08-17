@@ -66,7 +66,7 @@ X-API-Key: <password>
 
 ## 任务轮询（GET /api/tasks/{task_id}）
 
-返回 `{"name","status","stage","progress","file_count","total_bytes","message",...}`；`status` 为 `pending|processing|done|partial|error`。客户端 1–2s 轮询，后三项均为终态。
+返回 `{"name","status","stage","progress","file_count","total_bytes","message",...}`；`status` 为 `pending|processing|done|partial|error`。客户端 1–2s 轮询，后三项均为终态。查询任务时服务端保留最近 20 个终态快照并淘汰更旧记录；任务不存在（包括进程重启后）应停止轮询。
 
 ## 知识库管理
 

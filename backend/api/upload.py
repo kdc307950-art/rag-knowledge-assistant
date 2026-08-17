@@ -10,6 +10,7 @@ from enterprise_rag.services.document_service import DocumentService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+_TASK_HISTORY_LIMIT = 20
 
 
 class _UploadFileAdapter:
@@ -48,7 +49,14 @@ async def upload(files: list[UploadFile] = File(...)):
 @router.get("/tasks/{task_id}")
 async def get_task(task_id: str):
     """查询单个后台入库任务快照。"""
-    tasks = DocumentService().get_upload_tasks()
+    service = DocumentService()
+    # React 轮询是退役 Streamlit 后的唯一常规入口；在读取快照时顺便
+    # 淘汰旧终态，避免进程级任务字典无限增长。
+    service.clear_finished_tasks(
+        keep_last=_TASK_HISTORY_LIMIT,
+        preserve_task_id=task_id,
+    )
+    tasks = service.get_upload_tasks()
     task = tasks.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="任务不存在或已过期")

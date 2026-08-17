@@ -33,6 +33,12 @@ export default function StatusBar() {
     };
   }, [tick]);
 
+  useEffect(() => {
+    const onKnowledgeChanged = () => setTick((value) => value + 1);
+    window.addEventListener("kb:changed", onKnowledgeChanged);
+    return () => window.removeEventListener("kb:changed", onKnowledgeChanged);
+  }, []);
+
   return (
     <header className="relative flex flex-wrap items-center justify-between gap-3 border-b bg-white px-4 py-2">
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">

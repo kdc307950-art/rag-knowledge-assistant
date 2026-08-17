@@ -9,6 +9,8 @@ function statusLabel(message: ChatMessage) {
   if (message.status === "streaming") return "正在生成";
   if (message.status === "stopped") return "已停止，未写入会话历史";
   if (message.status === "error") return "生成未完成，未写入会话历史";
+  if (message.meta?.is_kb_busy) return "知识库正在更新，本次未执行检索。";
+  if (message.meta?.is_kb_stale) return "知识库已更新，此回答未写入缓存。";
   return null;
 }
 

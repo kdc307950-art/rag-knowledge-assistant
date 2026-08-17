@@ -1,6 +1,6 @@
 # 企业知识库智能助手
 
-企业内部 RAG（检索增强生成）应用，面向制度、流程、福利、项目资料和业务文档的检索问答。前端正从 Streamlit 迁移到 React + FastAPI：React M2 已提供鉴权、运行诊断和 SSE 流式问答；上传、任务进度和文档管理仍由 Streamlit 过渡层承载，M4 验收前不得删除该层。
+企业内部 RAG（检索增强生成）应用，面向制度、流程、福利、项目资料和业务文档的检索问答。前端正从 Streamlit 迁移到 React + FastAPI：React M3 已提供鉴权、运行诊断、SSE 流式问答、文档上传、任务进度和文档管理；Streamlit 仍作为 G2、起草与调试功能的过渡层，M4 验收前不得删除。
 
 系统默认采用严格知识库模式：除明确问候语外，所有问题先检索企业知识库；检索不到时直接拒答，不自动使用模型通用知识补全。用户只有在界面中主动点击后，才能切换到带醒目标识的通用办公回答。
 
@@ -56,7 +56,7 @@ OPENAI_MODEL=your-model-name
 
 首次启动需要下载 Embedding 与 Reranker 模型。可联网环境保持 `HF_HUB_OFFLINE=0`；离线部署应先下载模型，再设置 `HF_HUB_OFFLINE=1`，也可以直接把 `EMBEDDING_MODEL`、`RERANKER_MODEL` 指向包含 `config.json` 的本地模型目录。
 
-### 启动 React 问答界面（当前主入口）
+### 启动 React 主界面（当前主入口）
 
 ```powershell
 # 终端 1：FastAPI，必须保持单进程单 worker
@@ -70,11 +70,13 @@ npm run dev
 
 浏览器访问：`http://127.0.0.1:5173`
 
-React M2 使用 `POST /api/chat` 的 `token* -> done | error` SSE 协议。停止按钮会中止浏览器请求并保留已显示正文，但同步模型调用只能尽力停止，不能保证供应商侧立即停止推理或计费。服务端生成的 `X-Session-Id` 会保存在当前标签页的 `sessionStorage` 并随下一问回传；刷新页面保留上下文，新标签页使用独立会话，退出或鉴权失败会清除它。
+React 使用 `POST /api/chat` 的 `token* -> done | error` SSE 协议。停止按钮会中止浏览器请求并保留已显示正文，但同步模型调用只能尽力停止，不能保证供应商侧立即停止推理或计费。服务端生成的 `X-Session-Id` 会保存在当前标签页的 `sessionStorage` 并随下一问回传；刷新页面保留上下文，新标签页使用独立会话，退出或鉴权失败会清除它。
+
+M3 资料管理直接调用既有 REST 协议：可批量选择或拖放 PDF、DOCX、TXT、MD；前端会拦截空文件、同批同名文件、单文件超过 20MB 和批次超过 200MB。提交后按 `task_id` 轮询，显示排队、解析、入库、部分失败和清理状态；活动任务 ID 保存在当前标签页的 `sessionStorage`，页面刷新后会继续轮询。任务因服务重启而返回 404 时会停止轮询并刷新文档/统计。上传期间会禁用删除和清空操作，服务端仍以 404/409 作为跨标签页或跨客户端的最终并发保护。
 
 ### 过渡期 Streamlit 界面
 
-上传、任务进度、文档列表和清空操作尚未迁移到 React。需要这些功能时仍可启动：
+React 已覆盖上传、任务进度、文档列表、删除和清空。仅在需要 G2、基于资料起草或旧调试视图时启动 Streamlit：
 
 ```powershell
 uv run streamlit run enterprise_rag/app.py --server.port 8501
@@ -95,7 +97,7 @@ uv run streamlit run enterprise_rag/app.py --server.port 8501
 
 ```text
 表现层（迁移中）
-  frontend/src/            React：鉴权、诊断、SSE 问答与停止（M2）
+  frontend/src/            React：鉴权、诊断、SSE 问答、上传和文档管理（M3）
   enterprise_rag/app.py
     ├─ ui/chat_ui.py       过渡期聊天、G2/起草按钮
     └─ ui/sidebar.py       过渡期文件上传、任务状态、知识库管理
@@ -335,6 +337,7 @@ Get-Content "$env:RAG_DATA_DIR\logs\error.log" -Tail 50
 - 模块导入和启动烟测
 - FastAPI SSE 跨线程投递、断连检测、唯一终态和失败历史隔离
 - React SSE 的 UTF-8 任意分块、CRLF、错误终态、畸形数据和 401 会话清理
+- React 上传的重复 multipart `files` 字段、多任务轮询、终态后刷新和任务过期停止轮询
 - 离线原子备份、SHA-256 篡改检测、保留策略和恢复回滚
 - 聚合诊断、manifest/Chroma 一致性、错误摘要脱敏和 API 鉴权
 - RAG-First 路由与严格拒答
@@ -347,7 +350,7 @@ Get-Content "$env:RAG_DATA_DIR\logs\error.log" -Tail 50
 - DashScope 专用 Key 与通用 OpenAI 兼容 Key 的选择规则
 - 在线、离线缓存、本地模型目录和缺失模型的就绪检测
 
-当前完整测试基线：`161 passed`。
+当前完整测试基线：`163 passed`。
 
 其中包含真实临时 Chroma + SQLite manifest 的一致性测试：未提交 staging 不可见、完整/残缺 staging 重试、旧版本清理失败隔离、manifest 代际传播、上传期间向量/混合查询熔断、BM25 最终候选二次可见性过滤，以及缓存 L1/L2 命中和写入期间代际变化时 fail closed。
 

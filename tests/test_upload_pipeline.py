@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
+from concurrent.futures import Future
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -469,6 +471,48 @@ def test_submit_failure_releases_slot_and_marks_registered_task_error(monkeypatc
     assert task["status"] == "error"
     staging_root = tmp_path / "staging"
     assert not staging_root.exists() or not any(staging_root.iterdir())
+
+
+def test_task_history_cleanup_preserves_terminal_task_with_running_future(monkeypatch):
+    """worker 已写终态、但 Future 回调尚未执行时不能淘汰任务快照。"""
+    from enterprise_rag.services import document_service
+
+    in_flight = Future()
+    tasks = {
+        "in-flight": {"status": "done", "updated_at": 1},
+        "old": {"status": "done", "updated_at": 2},
+    }
+    monkeypatch.setattr(document_service, "_UPLOAD_TASKS", tasks)
+    monkeypatch.setattr(document_service, "_UPLOAD_FUTURES", {"in-flight": in_flight})
+
+    document_service.DocumentService().clear_finished_tasks(keep_last=0)
+
+    assert "in-flight" in tasks
+    assert "old" not in tasks
+
+
+def test_task_polling_preserves_current_terminal_task_during_history_cleanup(monkeypatch):
+    """轮询最旧终态任务时，清理历史也必须先返回它而不是 404。"""
+    from backend.api import upload as upload_api
+    from enterprise_rag.services import document_service
+
+    current_task_id = "current"
+    tasks = {
+        current_task_id: {"status": "done", "updated_at": 0},
+        **{
+            f"finished-{index}": {"status": "done", "updated_at": index}
+            for index in range(1, 21)
+        },
+    }
+    monkeypatch.setattr(document_service, "_UPLOAD_TASKS", tasks)
+    monkeypatch.setattr(document_service, "_UPLOAD_FUTURES", {})
+
+    response = asyncio.run(upload_api.get_task(current_task_id))
+
+    assert response["status"] == "done"
+    assert current_task_id in tasks
+    assert "finished-1" not in tasks
+    assert len(tasks) == 20
 
 
 def test_staging_enforces_actual_bytes_not_only_declared_size(monkeypatch, tmp_path):
