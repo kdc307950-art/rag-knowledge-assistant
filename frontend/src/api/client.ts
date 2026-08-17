@@ -13,10 +13,12 @@ export class ApiError extends Error {
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const apiKey = localStorage.getItem("apiKey") ?? "";
+  const hasBody = init?.body != null;
+  const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(hasBody && !isFormData ? { "Content-Type": "application/json" } : {}),
       ...(apiKey ? { "X-API-Key": apiKey } : {}),
       ...init?.headers,
     },
