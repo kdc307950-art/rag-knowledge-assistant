@@ -40,7 +40,8 @@ dev = [
 
 [tool.pytest.ini_options]
 # 本项目不依赖 pytest 的跨运行结果缓存；禁用它可避免受限目录中的缓存写入阻塞测试退出。
-addopts = "-p no:cacheprovider"
+# Windows 用户临时目录在受限账户下可能不可枚举，测试临时文件统一留在已忽略的工作区目录。
+addopts = "-p no:cacheprovider --basetemp=.pytest-tmp-work"
 
 [build-system]
 requires = ["uv_build>=0.12.3,<0.13.0"]

@@ -21,7 +21,7 @@ enterprise_rag/kb_data/
 *.sqlite3-wal
 
 # Local temporary output
-.pytest-tmp-*/
+/.pytest-tmp-*
 *.log
 backups/
 .api_test_data/
@@ -30,8 +30,4 @@ backups/
 pure_chroma_probe/
 
 # Local audit/probe scripts
-/_api_smoke.py
-/_diag*.py
-/_faulthandler_diag.py
-/_pure_chroma.py
-/_step3.py
+/_*.py
