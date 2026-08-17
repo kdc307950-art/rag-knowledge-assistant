@@ -269,7 +269,7 @@ class RagService:
                     continue
                 full_response += chunk
                 yield chunk
-        except Exception:
+        except Exception as exc:
             logger.exception("严格知识库回答生成失败")
             # 已流出的内容无法从浏览器撤回。保留同一份中断内容到会话元数据，
             # 避免首屏、聊天历史和缓存审计出现三份不同的回答。
@@ -278,6 +278,7 @@ class RagService:
             full_response = (full_response + interruption) if had_output else (
                 "抱歉，生成回答时出现错误，请稍后重试。"
             )
+            _message, error_code = _general_failure_details(exc)
             self._last_meta = {
                 "content": full_response,
                 "sources": [],
@@ -286,6 +287,8 @@ class RagService:
                 "retrieval_query": decision.retrieval_query,
                 "draft_allowed": False,
                 "is_interrupted": had_output,
+                "action_failed": True,
+                "error_code": error_code,
             }
             # 只有尚未输出任何文本时才直接向流发送错误全文；已有部分输出时，
             # 只补充中断标记，避免把前缀重复显示一遍。
@@ -308,6 +311,8 @@ class RagService:
                 "retrieval_query": decision.retrieval_query,
                 "draft_allowed": False,
                 "is_empty": True,
+                "action_failed": True,
+                "error_code": "empty_response",
             }
             yield full_response
             return
@@ -367,7 +372,13 @@ class RagService:
             return
         if decision.error:
             content = "抱歉，知识库检索服务暂时不可用，请稍后重试。"
-            self._last_meta = {"content": content, "sources": [], "thought": self._thought(decision)}
+            self._last_meta = {
+                "content": content,
+                "sources": [],
+                "thought": self._thought(decision),
+                "action_failed": True,
+                "error_code": "retrieval_error",
+            }
             yield content
             return
         if not decision.has_results:
@@ -435,7 +446,15 @@ class RagService:
             return
         if decision.error or not decision.has_results:
             content = "抱歉，起草所需资料已不可用，请重新提问后再试。"
-            self._last_meta = {"content": content, "sources": [], "thought": self._thought(decision)}
+            self._last_meta = {
+                "content": content,
+                "sources": [],
+                "thought": self._thought(decision),
+                "action_failed": True,
+                "error_code": (
+                    "retrieval_error" if decision.error else "generation_error"
+                ),
+            }
             yield content
             return
         yield from self._stream_from_decision(decision, template=DRAFT_SYSTEM_PROMPT, mode="draft")
