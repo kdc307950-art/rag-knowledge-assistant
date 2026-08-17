@@ -1,5 +1,7 @@
-// fetch 封装：统一带 X-API-Key，401 触发登出事件。
+// fetch 封装：统一带认证与会话头，401 触发登出事件。
 const API_BASE = "/api";
+export const API_KEY_STORAGE_KEY = "apiKey";
+export const SESSION_ID_STORAGE_KEY = "sessionId";
 
 export class ApiError extends Error {
   status: number;
@@ -11,22 +13,43 @@ export class ApiError extends Error {
   }
 }
 
-export async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const apiKey = localStorage.getItem("apiKey") ?? "";
+function unauthorized(): never {
+  localStorage.removeItem(API_KEY_STORAGE_KEY);
+  localStorage.removeItem(SESSION_ID_STORAGE_KEY);
+  window.dispatchEvent(new CustomEvent("auth:logout"));
+  throw new ApiError(401, "unauthorized");
+}
+
+export function captureSessionId(response: Response) {
+  const sessionId = response.headers.get("X-Session-Id");
+  if (sessionId) {
+    localStorage.setItem(SESSION_ID_STORAGE_KEY, sessionId);
+  }
+}
+
+export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  const apiKey = localStorage.getItem(API_KEY_STORAGE_KEY) ?? "";
+  const sessionId = localStorage.getItem(SESSION_ID_STORAGE_KEY) ?? "";
   const hasBody = init?.body != null;
   const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
+  const headers = new Headers(init?.headers);
+
+  if (hasBody && !isFormData && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (apiKey && !headers.has("X-API-Key")) {
+    headers.set("X-API-Key", apiKey);
+  }
+  if (sessionId && !headers.has("X-Session-Id")) {
+    headers.set("X-Session-Id", sessionId);
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: {
-      ...(hasBody && !isFormData ? { "Content-Type": "application/json" } : {}),
-      ...(apiKey ? { "X-API-Key": apiKey } : {}),
-      ...init?.headers,
-    },
+    headers,
   });
   if (res.status === 401) {
-    localStorage.removeItem("apiKey");
-    window.dispatchEvent(new CustomEvent("auth:logout"));
-    throw new ApiError(401, "unauthorized");
+    unauthorized();
   }
   if (!res.ok) {
     let detail = res.statusText;
@@ -38,5 +61,11 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(res.status, detail);
   }
+  return res;
+}
+
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await apiFetch(path, init);
+  captureSessionId(res);
   return res.json() as Promise<T>;
 }

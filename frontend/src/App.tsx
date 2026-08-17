@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import Login from "./pages/Login";
+import ChatPanel from "./components/ChatPanel";
 import StatusBar from "./components/StatusBar";
 import { useAuth } from "./store/auth";
 
@@ -18,10 +19,10 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-gray-100">
+    <div className="flex min-h-dvh flex-col bg-gray-100">
       <StatusBar />
-      <main className="flex-1 overflow-auto flex items-center justify-center text-gray-400">
-        M1 完成：聊天面板将在 M2 接入
+      <main className="min-h-0 flex-1 overflow-hidden">
+        <ChatPanel />
       </main>
     </div>
   );

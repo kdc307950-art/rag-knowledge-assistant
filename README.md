@@ -1,6 +1,6 @@
 # 企业知识库智能助手
 
-基于 Streamlit 的企业内部 RAG（检索增强生成）应用，面向制度、流程、福利、项目资料和业务文档的检索问答。
+企业内部 RAG（检索增强生成）应用，面向制度、流程、福利、项目资料和业务文档的检索问答。前端正从 Streamlit 迁移到 React + FastAPI：React M2 已提供鉴权、运行诊断和 SSE 流式问答；上传、任务进度和文档管理仍由 Streamlit 过渡层承载，M4 验收前不得删除该层。
 
 系统默认采用严格知识库模式：除明确问候语外，所有问题先检索企业知识库；检索不到时直接拒答，不自动使用模型通用知识补全。用户只有在界面中主动点击后，才能切换到带醒目标识的通用办公回答。
 
@@ -20,6 +20,7 @@
 
 - Python `3.10` 或 `3.11`（当前固定依赖不支持 Python 3.12）
 - Streamlit `1.61.1`
+- Node.js（本机已用 `v24.19.0` 验证 React 前端构建）
 - 已安装 `uv`
 - 可访问 OpenAI 兼容接口（默认配置兼容 DashScope）
 
@@ -55,13 +56,29 @@ OPENAI_MODEL=your-model-name
 
 首次启动需要下载 Embedding 与 Reranker 模型。可联网环境保持 `HF_HUB_OFFLINE=0`；离线部署应先下载模型，再设置 `HF_HUB_OFFLINE=1`，也可以直接把 `EMBEDDING_MODEL`、`RERANKER_MODEL` 指向包含 `config.json` 的本地模型目录。
 
-### 启动应用
+### 启动 React 问答界面（当前主入口）
+
+```powershell
+# 终端 1：FastAPI，必须保持单进程单 worker
+uv run uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 1
+
+# 终端 2：React 开发服务器
+Set-Location frontend
+npm install
+npm run dev
+```
+
+浏览器访问：`http://127.0.0.1:5173`
+
+React M2 使用 `POST /api/chat` 的 `token* -> done | error` SSE 协议。停止按钮会中止浏览器请求并保留已显示正文，但同步模型调用只能尽力停止，不能保证供应商侧立即停止推理或计费。服务端生成的 `X-Session-Id` 会保存在浏览器本地并随下一问回传；退出或鉴权失败会清除它。
+
+### 过渡期 Streamlit 界面
+
+上传、任务进度、文档列表和清空操作尚未迁移到 React。需要这些功能时仍可启动：
 
 ```powershell
 uv run streamlit run enterprise_rag/app.py --server.port 8501
 ```
-
-浏览器访问：`http://127.0.0.1:8501`
 
 ## 架构说明
 
@@ -77,10 +94,11 @@ uv run streamlit run enterprise_rag/app.py --server.port 8501
 ### 分层结构
 
 ```text
-表现层
+表现层（迁移中）
+  frontend/src/            React：鉴权、诊断、SSE 问答与停止（M2）
   enterprise_rag/app.py
-    ├─ ui/chat_ui.py       聊天展示、流式输出、G2/起草按钮
-    └─ ui/sidebar.py       文件上传、任务状态、知识库管理
+    ├─ ui/chat_ui.py       过渡期聊天、G2/起草按钮
+    └─ ui/sidebar.py       过渡期文件上传、任务状态、知识库管理
 
 业务编排层
   services/chat_service.py       问候白名单、历史选择、RAG 编排
@@ -295,6 +313,11 @@ FastAPI 启动后会在后台执行一次不阻塞服务启动的轻量自检。
 
 ```powershell
 uv run pytest tests -q
+
+Set-Location frontend
+npm run test
+npm run build
+npm run lint
 ```
 
 ### 日志排障
@@ -311,6 +334,7 @@ Get-Content "$env:RAG_DATA_DIR\logs\error.log" -Tail 50
 
 - 模块导入和启动烟测
 - FastAPI SSE 跨线程投递、断连检测、唯一终态和失败历史隔离
+- React SSE 的 UTF-8 任意分块、CRLF、错误终态、畸形数据和 401 会话清理
 - 离线原子备份、SHA-256 篡改检测、保留策略和恢复回滚
 - 聚合诊断、manifest/Chroma 一致性、错误摘要脱敏和 API 鉴权
 - RAG-First 路由与严格拒答
