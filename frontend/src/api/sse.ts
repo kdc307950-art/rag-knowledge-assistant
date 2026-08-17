@@ -11,6 +11,19 @@ type StreamOptions = StreamCallbacks & {
   signal: AbortSignal;
 };
 
+const DONE_BOOLEAN_KEYS = [
+  "is_reject",
+  "is_kb_busy",
+  "fallback_allowed",
+  "draft_allowed",
+  "from_cache",
+  "is_interrupted",
+  "is_empty",
+  "action_failed",
+  "is_kb_stale",
+  "is_kb",
+] as const;
+
 class SseProtocolError extends Error {
   constructor(message: string) {
     super(message);
@@ -19,14 +32,32 @@ class SseProtocolError extends Error {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseDoneMeta(value: unknown): ChatDoneMeta {
   if (!isRecord(value)) {
     throw new SseProtocolError("后端返回了格式错误的完成事件。");
   }
-  return value as ChatDoneMeta;
+  const meta: ChatDoneMeta = {};
+  if (Array.isArray(value.sources)) {
+    meta.sources = value.sources.filter(
+      (source): source is string => typeof source === "string" && source.trim().length > 0,
+    );
+  }
+  if (typeof value.thought === "string" || value.thought === null) {
+    meta.thought = value.thought;
+  }
+  if (typeof value.error_code === "string") {
+    meta.error_code = value.error_code;
+  }
+  for (const key of DONE_BOOLEAN_KEYS) {
+    const candidate = value[key];
+    if (typeof candidate === "boolean") {
+      meta[key] = candidate;
+    }
+  }
+  return meta;
 }
 
 function parseStreamError(value: unknown): ChatStreamError {

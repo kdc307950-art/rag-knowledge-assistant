@@ -140,6 +140,32 @@ describe("streamChat", () => {
     });
   });
 
+  it("normalizes malformed optional done metadata instead of passing it to the UI", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      responseFromBytes(
+        [
+          "event: done\n",
+          'data: {"sources":"not-an-array","is_kb":true,"is_reject":null,"from_cache":"yes"}\n\n',
+        ].join(""),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const received = callbacks();
+
+    await streamChat("问题", { signal: new AbortController().signal, ...received });
+
+    expect(received.done).toEqual({ is_kb: true });
+  });
+
+  it("rejects a non-object done payload", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(responseFromBytes("event: done\ndata: []\n\n")));
+    const received = callbacks();
+
+    await expect(
+      streamChat("问题", { signal: new AbortController().signal, ...received }),
+    ).rejects.toThrow("格式错误的完成事件");
+  });
+
   it("fails safely for malformed event data", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(responseFromBytes("event: token\ndata: not-json\n\n")));
     const received = callbacks();
