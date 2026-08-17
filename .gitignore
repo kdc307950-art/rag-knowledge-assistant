@@ -1,0 +1,25 @@
+# Python / tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+.idea/
+
+# Secrets
+.env
+enterprise_rag/.env
+.streamlit/secrets.toml
+
+# Runtime data
+data/
+kb_data/
+enterprise_rag/kb_data/
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+
+# Local temporary output
+.pytest-tmp-*/
+*.log

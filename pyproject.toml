@@ -1,0 +1,51 @@
+[project]
+name = "rag-app"
+version = "0.1.0"
+description = "Strict knowledge-base-first RAG assistant built with Streamlit"
+requires-python = ">=3.10"
+dependencies = [
+    "streamlit==1.61.1",
+    "openai==2.53.0",
+    "tenacity==9.1.4",
+    "python-dotenv==1.2.2",
+    "pypdf==6.15.0",
+    "python-docx==1.2.0",
+    "langchain-text-splitters==1.1.2",
+    "sentence-transformers==5.7.0",
+    "chromadb==1.5.9",
+    "rank-bm25==0.2.2",
+    "jieba==0.42.1",
+    "numpy==1.26.4",
+    "scipy==1.13.1",
+    "pandas==2.0.3",
+    "pyarrow==15.0.0",
+    "opencv-python-headless==4.9.0.80",
+    "pillow==12.3.0",
+    "typing-extensions==4.16.0",
+    "click==8.4.2",
+    "regex==2026.7.19",
+    "packaging==23.2",
+    "protobuf==7.35.1",
+    "bleach==6.4.0",
+    "Markdown==3.10.3",
+    "markdown-it-py==4.2.0",
+    "onnxruntime==1.23.2",
+    "fastapi>=0.141.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0,<10.0",
+]
+
+[tool.pytest.ini_options]
+# 本项目不依赖 pytest 的跨运行结果缓存；禁用它可避免受限目录中的缓存写入阻塞测试退出。
+addopts = "-p no:cacheprovider"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "enterprise_rag"
+module-root = ""
