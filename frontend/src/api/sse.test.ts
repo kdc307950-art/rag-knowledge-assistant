@@ -59,13 +59,16 @@ function callbacks() {
 
 describe("streamChat", () => {
   let storage: ReturnType<typeof createStorage>;
+  let session: ReturnType<typeof createStorage>;
   let dispatchEvent: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     storage = createStorage();
+    session = createStorage();
     storage.setItem(API_KEY_STORAGE_KEY, "test-key");
     dispatchEvent = vi.fn();
     vi.stubGlobal("localStorage", storage);
+    vi.stubGlobal("sessionStorage", session);
     vi.stubGlobal("window", { dispatchEvent });
     vi.stubGlobal(
       "CustomEvent",
@@ -84,7 +87,7 @@ describe("streamChat", () => {
   });
 
   it("decodes CRLF SSE frames split across UTF-8 byte boundaries and stores the session", async () => {
-    storage.setItem(SESSION_ID_STORAGE_KEY, "previous-session");
+    session.setItem(SESSION_ID_STORAGE_KEY, "previous-session");
     const fetchMock = vi.fn().mockResolvedValue(
       responseFromBytes(
         [
@@ -108,7 +111,7 @@ describe("streamChat", () => {
       sources: ["员工手册.pdf | 第 3 页"],
       is_kb: true,
     });
-    expect(storage.getItem(SESSION_ID_STORAGE_KEY)).toBe("new-session");
+    expect(session.getItem(SESSION_ID_STORAGE_KEY)).toBe("new-session");
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-API-Key")).toBe("test-key");
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-Session-Id")).toBe("previous-session");
   });
@@ -163,7 +166,7 @@ describe("streamChat", () => {
       streamChat("问题", { signal: new AbortController().signal, ...received }),
     ).rejects.toBeInstanceOf(ApiError);
     expect(storage.getItem(API_KEY_STORAGE_KEY)).toBeNull();
-    expect(storage.getItem(SESSION_ID_STORAGE_KEY)).toBeNull();
+    expect(session.getItem(SESSION_ID_STORAGE_KEY)).toBeNull();
     expect(dispatchEvent).toHaveBeenCalledOnce();
   });
 });

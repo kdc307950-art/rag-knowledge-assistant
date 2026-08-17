@@ -15,21 +15,25 @@ export class ApiError extends Error {
 
 function unauthorized(): never {
   localStorage.removeItem(API_KEY_STORAGE_KEY);
-  localStorage.removeItem(SESSION_ID_STORAGE_KEY);
+  clearSessionId();
   window.dispatchEvent(new CustomEvent("auth:logout"));
   throw new ApiError(401, "unauthorized");
+}
+
+export function clearSessionId() {
+  sessionStorage.removeItem(SESSION_ID_STORAGE_KEY);
 }
 
 export function captureSessionId(response: Response) {
   const sessionId = response.headers.get("X-Session-Id");
   if (sessionId) {
-    localStorage.setItem(SESSION_ID_STORAGE_KEY, sessionId);
+    sessionStorage.setItem(SESSION_ID_STORAGE_KEY, sessionId);
   }
 }
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const apiKey = localStorage.getItem(API_KEY_STORAGE_KEY) ?? "";
-  const sessionId = localStorage.getItem(SESSION_ID_STORAGE_KEY) ?? "";
+  const sessionId = sessionStorage.getItem(SESSION_ID_STORAGE_KEY) ?? "";
   const hasBody = init?.body != null;
   const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const headers = new Headers(init?.headers);
