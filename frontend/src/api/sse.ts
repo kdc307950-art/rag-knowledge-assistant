@@ -1,13 +1,13 @@
 import { apiFetch, captureSessionId } from "./client";
 import type { ChatDoneMeta, ChatStreamError } from "../types";
 
-type StreamCallbacks = {
+export type StreamCallbacks = {
   onToken: (token: string) => void;
   onDone: (meta: ChatDoneMeta) => void;
   onError: (error: ChatStreamError) => void;
 };
 
-type StreamOptions = StreamCallbacks & {
+export type StreamOptions = StreamCallbacks & {
   signal: AbortSignal;
 };
 
@@ -22,6 +22,8 @@ const DONE_BOOLEAN_KEYS = [
   "action_failed",
   "is_kb_stale",
   "is_kb",
+  "is_general",
+  "is_draft",
 ] as const;
 
 class SseProtocolError extends Error {
@@ -50,6 +52,12 @@ function parseDoneMeta(value: unknown): ChatDoneMeta {
   }
   if (typeof value.error_code === "string") {
     meta.error_code = value.error_code;
+  }
+  if (typeof value.query === "string") {
+    meta.query = value.query;
+  }
+  if (typeof value.retrieval_query === "string") {
+    meta.retrieval_query = value.retrieval_query;
   }
   for (const key of DONE_BOOLEAN_KEYS) {
     const candidate = value[key];
@@ -132,10 +140,14 @@ function consumeFrames(
   }
 }
 
-export async function streamChat(query: string, options: StreamOptions): Promise<void> {
-  const response = await apiFetch("/chat", {
+async function streamJson(
+  path: string,
+  body: Record<string, string>,
+  options: StreamOptions,
+): Promise<void> {
+  const response = await apiFetch(path, {
     method: "POST",
-    body: JSON.stringify({ query }),
+    body: JSON.stringify(body),
     signal: options.signal,
   });
   captureSessionId(response);
@@ -181,4 +193,20 @@ export async function streamChat(query: string, options: StreamOptions): Promise
     }
     reader.releaseLock();
   }
+}
+
+export function streamChat(query: string, options: StreamOptions): Promise<void> {
+  return streamJson("/chat", { query }, options);
+}
+
+export function streamGeneral(query: string, options: StreamOptions): Promise<void> {
+  return streamJson("/chat/general", { query }, options);
+}
+
+export function streamDraft(
+  query: string,
+  retrievalQuery: string,
+  options: StreamOptions,
+): Promise<void> {
+  return streamJson("/chat/draft", { query, retrieval_query: retrievalQuery }, options);
 }

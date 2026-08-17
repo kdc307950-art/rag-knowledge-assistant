@@ -91,22 +91,6 @@ def test_default_kb_directory_is_nested_under_runtime_data(monkeypatch, tmp_path
     assert config.KB_DATA_DIR == data_dir / "kb_data"
 
 
-@pytest.mark.parametrize(
-    ("status", "ready", "expected"),
-    [
-        ("已加载", True, ("已加载", "ready")),
-        ("已加载：BAAI/bge-reranker-v2-m3", True, ("已加载", "ready")),
-        ("待加载（首次使用时下载）", True, ("待加载", "processing")),
-        ("离线模式缺少重排模型", False, ("不可用", "error")),
-    ],
-)
-def test_sidebar_model_badge_is_short_and_semantically_correct(status, ready, expected):
-    """侧栏只显示稳定短标签，完整就绪原因留给悬停提示。"""
-    from enterprise_rag.ui.sidebar import _model_badge
-
-    assert _model_badge(status, ready) == expected
-
-
 def test_vector_store_health_reports_hnsw_corruption(monkeypatch):
     """HNSW 读取失败必须暴露为索引异常，不能被伪装成空知识库。"""
     from enterprise_rag.storage import vector_store
@@ -564,21 +548,6 @@ def test_retriever_includes_page_and_paragraph_in_sources(monkeypatch):
     assert raw[0]["paragraph"] == 2
 
 
-def test_chat_message_material_avatars_render():
-    from streamlit.testing.v1 import AppTest
-    from enterprise_rag.ui.chat_ui import ASSISTANT_AVATAR, USER_AVATAR
-
-    app = AppTest.from_string(
-        f'''
-import streamlit as st
-st.chat_message("user", avatar={USER_AVATAR!r}).write("ok")
-st.chat_message("assistant", avatar={ASSISTANT_AVATAR!r}).write("ok")
-'''
-    ).run()
-
-    assert len(app.exception) == 0
-
-
 def test_standalone_question_does_not_use_history_rewrite(monkeypatch):
     from enterprise_rag.llm import client
 
@@ -706,20 +675,17 @@ def test_entity_intro_selects_overview_and_non_sensitive_detail(monkeypatch, tmp
 
 
 def test_entity_detail_uses_unseen_blocks_and_warns_for_spoilers(monkeypatch, tmp_path):
-    import streamlit as st
-
     from enterprise_rag.core import state
 
     entity_service = _write_entity_store(monkeypatch, tmp_path)
-    st.session_state.clear()
-    state.init_state()
-    st.session_state.entity_coverage = {
+    state.reset_state()
+    state.set_state("entity_coverage", {
         "chengxin": {
             "presented_blocks": ["chengxin_overview", "chengxin_background"],
             "last_intent": "intro",
         }
-    }
-    st.session_state.active_entity_id = "chengxin"
+    })
+    state.set_state("active_entity_id", "chengxin")
     monkeypatch.setattr(entity_service, "generate_answer_stream", lambda *_: iter(["整合后的详细介绍。"] ))
 
     service = entity_service.EntityConversationService()
@@ -729,7 +695,7 @@ def test_entity_detail_uses_unseen_blocks_and_warns_for_spoilers(monkeypatch, tm
     assert plan.intent == "detail"
     assert [block.block_id for block in plan.selected_blocks] == ["chengxin_sword", "chengxin_luoji_relation"]
     assert "⚠️ **剧透提醒**" in output
-    assert st.session_state.entity_coverage["chengxin"]["presented_blocks"] == [
+    assert state.get_state("entity_coverage")["chengxin"]["presented_blocks"] == [
         "chengxin_overview",
         "chengxin_background",
         "chengxin_sword",
@@ -749,14 +715,11 @@ def test_entity_specific_question_prioritizes_entity_relation_blocks(monkeypatch
 
 
 def test_chat_service_keeps_configured_entity_on_rag_path(monkeypatch, tmp_path):
-    import streamlit as st
-
     from enterprise_rag.core import state
     from enterprise_rag.services import chat_service
 
     entity_service = _write_entity_store(monkeypatch, tmp_path)
-    st.session_state.clear()
-    state.init_state()
+    state.reset_state()
     service = chat_service.ChatService()
     captured = {}
     service.rag_service = SimpleNamespace(
@@ -878,14 +841,8 @@ def test_independent_rag_question_uses_current_question_only(monkeypatch):
 
 
 def test_cache_key_includes_original_question():
-    import streamlit as st
-
-    from enterprise_rag.core import state
-    from enterprise_rag.services import cache_service
     from enterprise_rag.services.cache_service import CacheService
 
-    st.session_state.clear()
-    state.init_state()
     cache = CacheService()
     assert cache.make_key("年假制度是什么", "history", original_query="程心是一个什么样的人") != cache.make_key(
         "年假制度是什么", "history", original_query="年假制度是什么"
@@ -894,14 +851,8 @@ def test_cache_key_includes_original_question():
 
 def test_cache_key_uses_complete_long_queries():
     """长问题即使前缀相同，也必须生成不同缓存键。"""
-    import streamlit as st
-
-    from enterprise_rag.core import state
-    from enterprise_rag.services import cache_service
     from enterprise_rag.services.cache_service import CacheService
 
-    st.session_state.clear()
-    state.init_state()
     cache = CacheService()
     prefix = "同一前缀" * 100
     first = prefix + "结尾一"
@@ -919,13 +870,8 @@ def test_cache_key_uses_complete_long_queries():
 
 def test_cache_key_changes_when_kb_directory_changes(monkeypatch, tmp_path):
     """切换向量库目录时必须隔离旧缓存，即使知识库代际相同。"""
-    import streamlit as st
-
-    from enterprise_rag.core import state
     from enterprise_rag.services import cache_service
 
-    st.session_state.clear()
-    state.init_state()
     monkeypatch.setattr(cache_service, "KB_DATA_DIR", tmp_path / "first-kb")
     first = cache_service.CacheService().make_key("问题", "")
     monkeypatch.setattr(cache_service, "KB_DATA_DIR", tmp_path / "second-kb")
@@ -959,15 +905,10 @@ def test_persistent_answer_cache_uses_lru_and_ttl(tmp_path):
 
 
 def test_cache_service_reads_persistent_entries_and_invalidates_by_generation(monkeypatch, tmp_path):
-    import streamlit as st
-
-    from enterprise_rag.core import state
     from enterprise_rag.services import cache_service
     from enterprise_rag.services.cache_service import CacheService
     from enterprise_rag.storage.cache import PersistentAnswerCache
 
-    st.session_state.clear()
-    state.init_state()
     backend = PersistentAnswerCache(tmp_path / "answer_cache.sqlite3")
     from enterprise_rag.storage.kb_manifest import KnowledgeBaseManifest
 
@@ -985,16 +926,11 @@ def test_cache_service_reads_persistent_entries_and_invalidates_by_generation(mo
 
 def test_cache_hit_is_discarded_if_manifest_changes_during_read(monkeypatch, tmp_path):
     """L2 命中后 manifest 换代时必须视为未命中，不能返回旧答案或回填 L1。"""
-    import streamlit as st
-
-    from enterprise_rag.core import state
     from enterprise_rag.services import cache_service
     from enterprise_rag.services.cache_service import CacheService
     from enterprise_rag.storage.cache import PersistentAnswerCache
     from enterprise_rag.storage.kb_manifest import KnowledgeBaseManifest
 
-    st.session_state.clear()
-    state.init_state()
     manifest = KnowledgeBaseManifest(tmp_path / "manifest.sqlite3")
     manifest.mark_initialized()
     backend = PersistentAnswerCache(tmp_path / "answer_cache.sqlite3")
@@ -1016,16 +952,11 @@ def test_cache_hit_is_discarded_if_manifest_changes_during_read(monkeypatch, tmp
 
 def test_cache_write_is_not_visible_if_manifest_changes_during_write(monkeypatch, tmp_path):
     """写缓存期间 manifest 换代时清除 L1，并由旧代际 key 隔离已写入的 L2。"""
-    import streamlit as st
-
-    from enterprise_rag.core import state
     from enterprise_rag.services import cache_service
     from enterprise_rag.services.cache_service import CacheService
     from enterprise_rag.storage.cache import PersistentAnswerCache
     from enterprise_rag.storage.kb_manifest import KnowledgeBaseManifest
 
-    st.session_state.clear()
-    state.init_state()
     manifest = KnowledgeBaseManifest(tmp_path / "manifest.sqlite3")
     manifest.mark_initialized()
     backend = PersistentAnswerCache(tmp_path / "answer_cache.sqlite3")
@@ -1046,16 +977,11 @@ def test_cache_write_is_not_visible_if_manifest_changes_during_write(monkeypatch
 
 def test_cache_write_failure_removes_uncommitted_l1_entry(monkeypatch, tmp_path):
     """L2 写入失败时不能只留下本进程可见的 L1 条目。"""
-    import streamlit as st
-
-    from enterprise_rag.core import state
     from enterprise_rag.services import cache_service
     from enterprise_rag.services.cache_service import CacheService
     from enterprise_rag.storage.cache import PersistentAnswerCache
     from enterprise_rag.storage.kb_manifest import KnowledgeBaseManifest
 
-    st.session_state.clear()
-    state.init_state()
     manifest = KnowledgeBaseManifest(tmp_path / "manifest.sqlite3")
     manifest.mark_initialized()
     backend = PersistentAnswerCache(tmp_path / "answer_cache.sqlite3")
@@ -1422,84 +1348,3 @@ def test_disabled_draft_resets_previous_metadata(monkeypatch):
     assert "".join(service.draft_stream("起草", "资料")) == "基于资料起草功能当前未启用。"
     assert service._last_meta["sources"] == []
     assert service._last_meta["draft_allowed"] is False
-
-
-def _png_bytes(color):
-    from PIL import Image
-
-    buffer = BytesIO()
-    Image.new("RGB", (8, 8), color=color).save(buffer, format="PNG")
-    return buffer.getvalue()
-
-
-class FakeUpload:
-    def __init__(self, name, data):
-        self.name = name
-        self._data = data
-
-    def getvalue(self):
-        return self._data
-
-
-def _patch_background_paths(monkeypatch, tmp_path):
-    from enterprise_rag.services import background_service
-
-    data_dir = tmp_path / "data"
-    monkeypatch.setattr(background_service, "DATA_DIR", data_dir)
-    monkeypatch.setattr(background_service, "BACKGROUND_DIR", data_dir / "backgrounds")
-    monkeypatch.setattr(background_service, "BACKGROUND_CONFIG", data_dir / "background.json")
-    return background_service
-
-
-def test_background_image_is_saved_in_data_folder(monkeypatch, tmp_path):
-    background_service = _patch_background_paths(monkeypatch, tmp_path)
-
-    name = background_service.save_background(FakeUpload("page.png", _png_bytes("red")))
-
-    assert name.startswith("background_")
-    assert (tmp_path / "data" / "backgrounds" / name).is_file()
-    assert background_service.get_current_background_name() == name
-    assert background_service.get_background_data_url().startswith("data:image/png;base64,")
-
-
-def test_background_rejects_non_image_content(monkeypatch, tmp_path):
-    background_service = _patch_background_paths(monkeypatch, tmp_path)
-
-    with pytest.raises(background_service.BackgroundImageError):
-        background_service.save_background(FakeUpload("not-image.png", b"not an image"))
-
-
-def test_background_rejects_excessive_pixel_dimensions(monkeypatch, tmp_path):
-    from PIL import Image
-
-    background_service = _patch_background_paths(monkeypatch, tmp_path)
-    buffer = BytesIO()
-    Image.new("RGB", (5000, 1), color="red").save(buffer, format="PNG")
-
-    with pytest.raises(background_service.BackgroundImageError, match="分辨率过大"):
-        background_service.save_background(FakeUpload("wide.png", buffer.getvalue()))
-
-
-def test_concurrent_background_saves_leave_one_valid_active_file(monkeypatch, tmp_path):
-    background_service = _patch_background_paths(monkeypatch, tmp_path)
-    names = []
-    errors = []
-
-    def save(color):
-        try:
-            names.append(
-                background_service.save_background(FakeUpload(f"{color}.png", _png_bytes(color)))
-            )
-        except Exception as exc:
-            errors.append(exc)
-
-    threads = [threading.Thread(target=save, args=(color,)) for color in ("red", "blue")]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=3)
-
-    active_name = background_service.get_current_background_name()
-    assert not errors
-    assert active_name in names
-    assert (tmp_path / "data" / "backgrounds" / active_name).is_file()

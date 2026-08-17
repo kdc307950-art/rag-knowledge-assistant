@@ -12,7 +12,6 @@ export default function Login() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password) return;
     setLoading(true);
     setError("");
     try {
@@ -37,22 +36,22 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <form onSubmit={submit} className="w-80 bg-white p-8 rounded-lg shadow">
         <h1 className="text-xl font-semibold text-center mb-1">企业知识库助手</h1>
-        <p className="text-sm text-gray-500 text-center mb-6">请输入访问口令</p>
+        <p className="text-sm text-gray-500 text-center mb-6">配置了访问口令时请输入；本地模式可留空</p>
         <input
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="访问口令"
+          placeholder="访问口令（可选）"
           autoFocus
           className="w-full border rounded px-3 py-2 mb-4 outline-none focus:border-blue-500"
         />
         {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
         <button
           type="submit"
-          disabled={loading || !password}
+          disabled={loading}
           className="w-full bg-blue-600 text-white rounded py-2 hover:bg-blue-700 disabled:opacity-50"
         >
-          {loading ? "验证中..." : "登录"}
+          {loading ? "验证中..." : password.trim() ? "登录" : "进入本地模式"}
         </button>
       </form>
     </div>

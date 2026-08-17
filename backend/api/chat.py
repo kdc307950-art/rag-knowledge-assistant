@@ -42,6 +42,8 @@ _META_KEYS = (
     "action_failed",
     "error_code",
     "is_kb_stale",
+    "query",
+    "retrieval_query",
 )
 
 _DISCONNECT_POLL_SECONDS = 0.2

@@ -1,5 +1,6 @@
 export type ChatRole = "user" | "assistant";
 export type ChatMessageStatus = "streaming" | "complete" | "stopped" | "error";
+export type ChatAction = "general" | "draft";
 
 export interface ChatDoneMeta {
   sources?: string[];
@@ -15,6 +16,10 @@ export interface ChatDoneMeta {
   error_code?: string;
   is_kb_stale?: boolean;
   is_kb?: boolean;
+  is_general?: boolean;
+  is_draft?: boolean;
+  query?: string;
+  retrieval_query?: string;
 }
 
 export interface ChatStreamError {
@@ -30,4 +35,10 @@ export interface ChatMessage {
   status?: ChatMessageStatus;
   meta?: ChatDoneMeta;
   error?: ChatStreamError;
+  request?: {
+    query: string;
+    retrievalQuery: string;
+  };
+  action?: ChatAction;
+  actionState?: Partial<Record<ChatAction, boolean>>;
 }

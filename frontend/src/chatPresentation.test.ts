@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { messageSources, messageStatusLabel, streamErrorTitle } from "./chatPresentation";
+import { messageActions, messageSources, messageStatusLabel, streamErrorTitle } from "./chatPresentation";
 import type { ChatMessage } from "./types";
 
 function assistant(meta?: ChatMessage["meta"]): ChatMessage {
@@ -13,6 +13,7 @@ describe("chat presentation", () => {
     ]);
     expect(messageSources(assistant({ sources: ["制度.pdf"] }))).toEqual([]);
     expect(messageSources(assistant({ sources: ["制度.pdf"], is_kb: false }))).toEqual([]);
+    expect(messageSources(assistant({ sources: ["制度.pdf"], is_kb: true, is_general: true }))).toEqual([]);
     expect(messageSources(assistant({ sources: ["制度.pdf"], is_kb: true, is_reject: true }))).toEqual([]);
     expect(messageSources(assistant({ sources: ["制度.pdf"], is_kb: true, is_kb_busy: true }))).toEqual([]);
     expect(messageSources(assistant({ sources: ["制度.pdf"], is_kb: true, is_kb_stale: true }))).toEqual([]);
@@ -45,5 +46,18 @@ describe("chat presentation", () => {
         error: { code: "authentication", message: "鉴权失败", partial: false },
       }),
     ).toContain("生成失败");
+  });
+
+  it("exposes G2 and drafting only while their originating answer remains eligible", () => {
+    expect(messageActions(assistant({ is_reject: true, fallback_allowed: true }))).toEqual(["general"]);
+    expect(
+      messageActions(assistant({ is_kb: true, draft_allowed: true, sources: ["制度.pdf"] })),
+    ).toEqual(["draft"]);
+    expect(
+      messageActions({
+        ...assistant({ is_reject: true, fallback_allowed: true }),
+        actionState: { general: true },
+      }),
+    ).toEqual([]);
   });
 });

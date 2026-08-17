@@ -50,7 +50,7 @@ async def upload(files: list[UploadFile] = File(...)):
 async def get_task(task_id: str):
     """查询单个后台入库任务快照。"""
     service = DocumentService()
-    # React 轮询是退役 Streamlit 后的唯一常规入口；在读取快照时顺便
+    # React 轮询是当前唯一常规入口；在读取快照时顺便
     # 淘汰旧终态，避免进程级任务字典无限增长。
     service.clear_finished_tasks(
         keep_last=_TASK_HISTORY_LIMIT,

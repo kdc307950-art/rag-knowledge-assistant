@@ -75,7 +75,7 @@ def _stream_upload_to_path(
     *,
     max_bytes: int | None = None,
 ) -> int:
-    """把 Streamlit 上传对象分块落盘，避免 ``getvalue()`` 再复制整份大文件。"""
+    """把上传对象分块落盘，避免 ``getvalue()`` 再复制整份大文件。"""
     destination.parent.mkdir(parents=True, exist_ok=True)
     if hasattr(upload, "seek"):
         upload.seek(0)
@@ -484,7 +484,7 @@ class DocumentService:
                 ),
             }
 
-        # 即使是多个小文件，解析和向量化也不应占用 Streamlit 主线程。
+        # 即使是多个小文件，解析和向量化也不应占用 API 事件循环线程。
         if not _UPLOAD_SLOTS.acquire(blocking=False):
             return {
                 "success": False,

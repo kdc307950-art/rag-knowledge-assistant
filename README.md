@@ -1,6 +1,6 @@
 # 企业知识库智能助手
 
-企业内部 RAG（检索增强生成）应用，面向制度、流程、福利、项目资料和业务文档的检索问答。前端正从 Streamlit 迁移到 React + FastAPI：React M4 已提供鉴权、运行诊断、SSE 流式问答、来源追溯、文档上传、任务进度和文档管理；Streamlit 仍作为 G2、起草与调试功能的过渡层，退役前必须完成等价行为映射和全量回归。
+企业内部 RAG（检索增强生成）应用，面向制度、流程、福利、项目资料和业务文档的检索问答。当前主界面为 React + FastAPI，已覆盖鉴权、运行诊断、SSE 流式问答、来源追溯、G2、资料起草、调试摘要、文档上传、任务进度和文档管理。
 
 系统默认采用严格知识库模式：除明确问候语外，所有问题先检索企业知识库；检索不到时直接拒答，不自动使用模型通用知识补全。用户只有在界面中主动点击后，才能切换到带醒目标识的通用办公回答。
 
@@ -19,7 +19,7 @@
 ### 环境要求
 
 - Python `3.10` 或 `3.11`（当前固定依赖不支持 Python 3.12）
-- Streamlit `1.61.1`
+- FastAPI + Uvicorn（由 `uv sync` 安装）
 - Node.js（本机已用 `v24.19.0` 验证 React 前端构建）
 - 已安装 `uv`
 - 可访问 OpenAI 兼容接口（默认配置兼容 DashScope）
@@ -52,7 +52,7 @@ OPENAI_MODEL=your-model-name
 
 未设置 `OPENAI_BASE_URL` 和 `OPENAI_MODEL` 时，系统使用 `enterprise_rag/config.py` 中的默认值。连接 DashScope 时优先读取 `DASHSCOPE_API_KEY`，避免误用操作系统中为其他服务配置的 `OPENAI_API_KEY`；未提供专用变量时仍兼容原有 `OPENAI_API_KEY`。
 
-配置优先级为：启动进程中显式设置的环境变量 > 项目根目录 `.env` > `enterprise_rag/.env`。因此部署平台或启动脚本可以覆盖本地文件，而根目录配置仍可覆盖包内示例值。更新 Key 或运行目录后必须重启 Streamlit 服务；日志只输出 Key 指纹，不输出明文。
+配置优先级为：启动进程中显式设置的环境变量 > 项目根目录 `.env` > `enterprise_rag/.env`。因此部署平台或启动脚本可以覆盖本地文件，而根目录配置仍可覆盖包内示例值。更新 Key 或运行目录后必须重启 FastAPI 服务；日志只输出 Key 指纹，不输出明文。
 
 首次启动需要下载 Embedding 与 Reranker 模型。可联网环境保持 `HF_HUB_OFFLINE=0`；离线部署应先下载模型，再设置 `HF_HUB_OFFLINE=1`，也可以直接把 `EMBEDDING_MODEL`、`RERANKER_MODEL` 指向包含 `config.json` 的本地模型目录。
 
@@ -72,15 +72,7 @@ npm run dev
 
 React 使用 `POST /api/chat` 的 `token* -> done | error` SSE 协议。停止按钮会中止浏览器请求并保留已显示正文，但同步模型调用只能尽力停止，不能保证供应商侧立即停止推理或计费。服务端生成的 `X-Session-Id` 会保存在当前标签页的 `sessionStorage` 并随下一问回传；刷新页面保留上下文，新标签页使用独立会话，退出或鉴权失败会清除它。
 
-M4 资料管理直接调用既有 REST 协议：可批量选择或拖放 PDF、DOCX、TXT、MD；前端会拦截空文件、同批同名文件、单文件超过 20MB 和批次超过 200MB。提交后按 `task_id` 轮询，显示排队、解析、入库、部分失败和清理状态；活动任务 ID 保存在当前标签页的 `sessionStorage`，页面刷新后会继续轮询。任务因服务重启而返回 404 时会停止轮询并刷新文档/统计。上传期间会禁用删除和清空操作，服务端仍以 404/409 作为跨标签页或跨客户端的最终并发保护。回答完成后仅对当前有效的知识库回答显示可折叠来源；严格拒答、知识库更新、模型鉴权、限流或额度不足和中断保留部分正文都有单独状态提示。
-
-### 过渡期 Streamlit 界面
-
-React 已覆盖上传、任务进度、文档列表、删除和清空。仅在需要 G2、基于资料起草或旧调试视图时启动 Streamlit：
-
-```powershell
-uv run streamlit run enterprise_rag/app.py --server.port 8501
-```
+M4 资料管理直接调用既有 REST 协议：可批量选择或拖放 PDF、DOCX、TXT、MD；前端会拦截空文件、同批同名文件、单文件超过 20MB 和批次超过 200MB。提交后按 `task_id` 轮询，显示排队、解析、入库、部分失败和清理状态；活动任务 ID 保存在当前标签页的 `sessionStorage`，页面刷新后会继续轮询。任务因服务重启而返回 404 时会停止轮询并刷新文档/统计。上传期间会禁用删除和清空操作，服务端仍以 404/409 作为跨标签页或跨客户端的最终并发保护。回答完成后仅对当前有效的知识库回答显示可折叠来源；严格拒答、知识库更新、模型鉴权、限流或额度不足和中断保留部分正文都有单独状态提示。拒答可显式切换到通用办公回答，命中资料的回答可基于原始检索上下文起草；动作失败时保留重试入口。
 
 ## 架构说明
 
@@ -96,11 +88,8 @@ uv run streamlit run enterprise_rag/app.py --server.port 8501
 ### 分层结构
 
 ```text
-表现层（迁移中）
-  frontend/src/            React：鉴权、诊断、SSE 问答、来源追溯、上传和文档管理（M4）
-  enterprise_rag/app.py
-    ├─ ui/chat_ui.py       过渡期聊天、G2/起草按钮
-    └─ ui/sidebar.py       过渡期文件上传、任务状态、知识库管理
+表现层
+  frontend/src/            React：鉴权、诊断、SSE 问答、来源追溯、G2/起草、调试摘要、上传和文档管理
 
 业务编排层
   services/chat_service.py       问候白名单、历史选择、RAG 编排
@@ -124,7 +113,7 @@ uv run streamlit run enterprise_rag/app.py --server.port 8501
   storage/kb_manifest.py         SQLite 激活版本清单与知识库逻辑代际
   storage/embedding.py           Embedding 模型
   storage/cache.py               SQLite TTL/LRU 回答缓存
-  core/state.py                  Streamlit session_state
+  core/state.py                  不依赖 UI 框架的进程内辅助状态
   utils/loader.py                PDF/DOCX/TXT/MD 解析
   utils/cleaner.py               模型输出清洗与 Markdown 渲染
 ```
@@ -174,9 +163,7 @@ Chroma 保存物理分块，`data/kb_manifest.sqlite3` 保存每个来源当前�
 
 ```text
 enterprise_rag/
-├─ app.py                 Streamlit 应用入口
 ├─ config.py              模型、检索、分块、缓存和功能开关
-├─ ui/                    聊天界面与侧边栏
 ├─ services/              对话、RAG、文档和缓存服务
 ├─ rag/                   分块、混合检索、重排和上下文构造
 ├─ storage/               Chroma、Embedding、SQLite 缓存
@@ -185,12 +172,11 @@ enterprise_rag/
 ├─ core/                  状态、常量和异常
 └─ utils/                 文件加载、清洗和日志
 
-tests/                    回归、流程、模型就绪和 UI 测试
+tests/                    回归、流程、模型就绪和前后端契约测试
 data/                     所有运行数据的默认根目录
 ├─ kb_data/               Chroma 持久化知识库
 ├─ kb_manifest.sqlite3    来源到激活 revision 的原子清单
 ├─ upload_staging/        上传文件临时暂存目录
-├─ backgrounds/           用户上传的界面背景
 ├─ entity_blocks.json     可选的结构化实体知识数据
 ├─ answer_cache.sqlite3   持久化回答缓存
 └─ logs/                  结构化运行日志与事故复盘台账
@@ -206,7 +192,7 @@ data/                     所有运行数据的默认根目录
 | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | 重排模型 |
 | `HF_HUB_OFFLINE` | `0` | `1` 时禁止在线下载 Hugging Face 模型 |
 | `APP_PASSWORD` | 空 | 可选的本地应用访问口令 |
-| `RAG_DATA_DIR` | `<项目根>/data` | 统一迁移缓存、背景、Chroma 与 manifest 的运行数据根目录 |
+| `RAG_DATA_DIR` | `<项目根>/data` | 统一迁移缓存、Chroma 与 manifest 的运行数据根目录 |
 | `RAG_LOG_DIR` | `<RAG_DATA_DIR>/logs` | 运行日志目录；适合部署时挂载到独立持久化卷 |
 | `LOG_LEVEL` | `INFO` | 日志最小等级，例如 `DEBUG`、`INFO`、`WARNING` |
 | `LOG_MAX_BYTES` | `5242880` | 单个日志文件滚动前的最大字节数，默认 5MB |
@@ -231,7 +217,7 @@ data/                     所有运行数据的默认根目录
 
 - `data/kb_data/`：Chroma 向量库。删除会清空已入库文档。
 - `data/kb_manifest.sqlite3`：知识库逻辑清单。它与 `kb_data/` 必须作为一个整体备份和恢复，不能只删除或恢复其中之一。
-- 向量库不再支持通过 `RAG_KB_DIR` 单独迁移；如需更换存储位置，只设置 `RAG_DATA_DIR`，保证 Chroma、manifest、缓存和背景配置使用同一运行数据根目录。
+- 向量库不再支持通过 `RAG_KB_DIR` 单独迁移；如需更换存储位置，只设置 `RAG_DATA_DIR`，保证 Chroma、manifest 和缓存使用同一运行数据根目录。
 - Windows 下 `RAG_DATA_DIR` 不要放在用户配置文件目录（如 `C:\Users\<用户名>\Documents`、`AppData`）或云同步目录：实测该类路径下 Chroma 无法持久化 HNSW 索引二进制文件（segment 目录为空），进程重启后索引丢失并报 `Error loading hnsw index`，向量数据不可恢复需重新入库。请将运行数据放在普通磁盘目录（如 `D:\...\data`）。
 - `data/entity_blocks.json`：可选的结构化实体知识数据；设置 `RAG_DATA_DIR` 后会随运行数据目录迁移。
 - 结构化实体服务当前是保留扩展，不参与 `ChatService.chat_stream()` 的主问答链路；事实问题仍统一执行 RAG-First。
@@ -242,8 +228,8 @@ data/                     所有运行数据的默认根目录
 - 日志会自动脱敏已配置的 API Key 和 Bearer Token；业务日志只记录问题长度、结果数量等诊断字段，不记录完整用户提问或文档正文。排障时优先查看 `error.log`，不要把日志中的来源文件名、路径或堆栈直接外发。
 - 主线程和后台上传线程的未捕获异常会自动写入 `error.log`；已捕获的业务异常应使用模块级 `logger.exception(...)` 或 `logger.error(...)` 记录，页面只展示面向用户的简短提示。
 - 文档内容更新、删除或清空时，系统会递增知识库代数，使旧回答缓存失效。
-- 后台上传线程只写任务快照，不直接操作 `st.session_state`。
-- 浏览器上传内容会先由 Streamlit 主线程以 1MB 分块写入 `data/upload_staging/`，因此大文件提交阶段仍受本机磁盘速度影响；解析、向量化和入库在暂存完成后才进入后台。
+- 后台上传线程只写任务快照，不依赖前端状态。
+- 浏览器上传内容会先由 FastAPI 进程以 1MB 分块写入 `data/upload_staging/`，因此大文件提交阶段仍受本机磁盘速度影响；解析、向量化和入库在暂存完成后才进入后台。
 - 上传任务默认最多保留 4 个执行中/等待任务；队列已满时会立即拒绝新任务，避免内存和磁盘无界增长。
 - 同一任务最多预取并行解析 2 个文件；一份解析完成后即按上传顺序进入串行 Embedding 与 Chroma 写入并释放正文，避免整批解析文本同时驻留内存。
 - 上传批次从暂存阶段起持有知识库变更闸门；其他会话的删除/清空操作会被拒绝，避免“清空成功后后台又写回”。
@@ -259,7 +245,7 @@ data/                     所有运行数据的默认根目录
 
 ### 离线备份与恢复
 
-Chroma/HNSW 在本项目中没有可靠的在线热快照契约。创建或恢复备份前必须停止 Streamlit、FastAPI 以及其他可能写入 `RAG_DATA_DIR` 的脚本，然后显式确认停写：
+Chroma/HNSW 在本项目中没有可靠的在线热快照契约。创建或恢复备份前必须停止 FastAPI 以及其他可能写入 `RAG_DATA_DIR` 的脚本，然后显式确认停写：
 
 ```powershell
 uv run python scripts/backup.py create --confirm-stopped
@@ -303,11 +289,10 @@ FastAPI 启动后会在后台执行一次不阻塞服务启动的轻量自检。
 
 ### 部署边界
 
-- `.streamlit/config.toml` 默认绑定 `127.0.0.1`，只允许本机访问。
 - 若改为局域网或公网地址，至少应配置 `APP_PASSWORD`，并在反向代理层启用 HTTPS。
 - 当前系统是单一共享知识库，没有用户、角色、租户隔离或文档级访问控制，不应直接作为生产多用户系统部署。
 - 上传闸门、Chroma 写锁、任务快照和 BM25 状态都是单进程内对象。必须保持单个应用进程、单个写实例；多个进程共享同一 `RAG_DATA_DIR` 不受这些锁保护。
-- Streamlit 会话状态按浏览器标签页隔离，但模型和向量库资源是进程级共享资源；高并发场景应另行拆分 API 服务、队列和权限层。
+- HTTP 会话历史由 `X-Session-Id` 绑定的进程内存储管理；模型和向量库资源是进程级共享资源。高并发场景应另行拆分 API 服务、队列和权限层。
 
 ## 测试与排障
 
@@ -334,7 +319,7 @@ Get-Content "$env:RAG_DATA_DIR\logs\error.log" -Tail 50
 
 当前测试覆盖：
 
-- 模块导入和启动烟测
+- 核心模块导入、输出清洗和会话历史边界
 - FastAPI SSE 跨线程投递、断连检测、唯一终态和失败历史隔离
 - React SSE 的 UTF-8 任意分块、CRLF、错误终态、畸形数据和 401 会话清理
 - React 上传的重复 multipart `files` 字段、多任务轮询、终态后刷新和任务过期停止轮询
@@ -346,8 +331,8 @@ Get-Content "$env:RAG_DATA_DIR\logs\error.log" -Tail 50
 - 向量/BM25 检索、重排和来源元数据
 - 全量后台上传、磁盘暂存、有界队列、并行解析、Chroma 串行写和批次索引刷新
 - SQLite TTL/LRU 缓存
-- 原生 `st.write_stream` 的正常、空流和异常流
-- G2 成功提交、鉴权失败提示和失败后重试状态
+- React SSE 的正常、空流和异常流
+- React G2/起草成功提交、鉴权失败提示和失败后重试状态
 - DashScope 专用 Key 与通用 OpenAI 兼容 Key 的选择规则
 - 在线、离线缓存、本地模型目录和缺失模型的就绪检测
 
@@ -369,11 +354,11 @@ Get-Content "$env:RAG_DATA_DIR\logs\error.log" -Tail 50
 
 **模型无法连接**
 
-默认 DashScope 配置应检查 `.env` 中的 `DASHSCOPE_API_KEY`、`OPENAI_BASE_URL` 和 `OPENAI_MODEL`；其他 OpenAI 兼容服务检查 `OPENAI_API_KEY`。修改后必须重启 Streamlit。若界面提示“模型鉴权失败”，说明请求已经到达模型服务，但当前 Key 未通过认证。
+默认 DashScope 配置应检查 `.env` 中的 `DASHSCOPE_API_KEY`、`OPENAI_BASE_URL` 和 `OPENAI_MODEL`；其他 OpenAI 兼容服务检查 `OPENAI_API_KEY`。修改后必须重启 FastAPI。若界面提示“模型鉴权失败”，说明请求已经到达模型服务，但当前 Key 未通过认证。
 
 **知识库显示为空，但提问提示“检索服务暂时不可用”**
 
-先查看日志中是否包含 `Error loading hnsw index`。这表示 Chroma HNSW 索引损坏，不是正常的“无资料”状态。确认旧知识库数据可以丢弃后，停止服务，同时删除运行目录下的 `kb_data` 和 `kb_manifest.sqlite3`（包括可能存在的 `-wal`、`-shm`），再重启应用创建新知识库。不要删除同级 `backgrounds`、`background.json` 或 `answer_cache.sqlite3`。若该问题反复出现，优先检查 `RAG_DATA_DIR` 是否位于用户配置目录（见“数据与运维”），并参考 `data/logs/incident_history.jsonl` 中的事故复盘。
+先查看日志中是否包含 `Error loading hnsw index`。这表示 Chroma HNSW 索引损坏，不是正常的“无资料”状态。确认旧知识库数据可以丢弃后，停止服务，同时删除运行目录下的 `kb_data` 和 `kb_manifest.sqlite3`（包括可能存在的 `-wal`、`-shm`），再重启应用创建新知识库。不要删除同级的 `answer_cache.sqlite3`。若该问题反复出现，优先检查 `RAG_DATA_DIR` 是否位于用户配置目录（见“数据与运维”），并参考 `data/logs/incident_history.jsonl` 中的事故复盘。
 
 **通用办公失败后按钮消失**
 

@@ -157,6 +157,28 @@ describe("streamChat", () => {
     expect(received.done).toEqual({ is_kb: true });
   });
 
+  it("keeps action metadata and canonical retrieval inputs for React follow-up actions", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      responseFromBytes(
+        [
+          "event: done\n",
+          'data: {"is_kb":true,"is_draft":true,"query":"请起草","retrieval_query":"请假制度"}\n\n',
+        ].join(""),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const received = callbacks();
+
+    await streamChat("请起草", { signal: new AbortController().signal, ...received });
+
+    expect(received.done).toEqual({
+      is_kb: true,
+      is_draft: true,
+      query: "请起草",
+      retrieval_query: "请假制度",
+    });
+  });
+
   it("rejects a non-object done payload", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(responseFromBytes("event: done\ndata: []\n\n")));
     const received = callbacks();

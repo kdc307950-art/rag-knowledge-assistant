@@ -10,7 +10,6 @@ __pycache__/
 # Secrets
 .env
 enterprise_rag/.env
-.streamlit/secrets.toml
 
 # Runtime data
 data/

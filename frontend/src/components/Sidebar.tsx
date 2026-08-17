@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useKnowledge } from "../store/knowledge";
+import { useSettings } from "../store/settings";
 import KnowledgeBase from "./KnowledgeBase";
 import TaskProgress from "./TaskProgress";
 import UploadZone from "./UploadZone";
@@ -11,6 +12,8 @@ export default function Sidebar() {
   const refreshDocuments = useKnowledge((state) => state.refreshDocuments);
   const resumeUploadTasks = useKnowledge((state) => state.resumeUploadTasks);
   const uploadFiles = useKnowledge((state) => state.uploadFiles);
+  const showDebug = useSettings((state) => state.showDebug);
+  const setShowDebug = useSettings((state) => state.setShowDebug);
 
   useEffect(() => {
     void refreshDocuments().catch(() => undefined);
@@ -32,6 +35,15 @@ export default function Sidebar() {
         {error && <p className="border border-red-200 bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">{error}</p>}
         <TaskProgress tasks={tasks} />
         <KnowledgeBase disabled={uploading} />
+        <label className="flex items-center gap-2 border-t pt-4 text-xs text-gray-600">
+          <input
+            type="checkbox"
+            checked={showDebug}
+            onChange={(event) => setShowDebug(event.target.checked)}
+            className="h-4 w-4 accent-blue-700"
+          />
+          显示回答依据
+        </label>
       </div>
     </aside>
   );

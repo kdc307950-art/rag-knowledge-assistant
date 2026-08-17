@@ -1,14 +1,9 @@
 """验证回答缓存只使用 manifest 代际，并在读写竞态时 fail closed。"""
 
-import streamlit as st
-
 
 def _init_state():
-    from enterprise_rag.core import state
     from enterprise_rag.services import cache_service
 
-    st.session_state.clear()
-    state.init_state()
     cache_service._l1_cache.clear()
 
 

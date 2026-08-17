@@ -1,5 +1,13 @@
 import { create } from "zustand";
-import type { ChatDoneMeta, ChatMessage, ChatMessageStatus, ChatStreamError } from "../types";
+import type {
+  ChatAction,
+  ChatDoneMeta,
+  ChatMessage,
+  ChatMessageStatus,
+  ChatStreamError,
+} from "../types";
+
+const MAX_MESSAGES = 80;
 
 interface ChatState {
   messages: ChatMessage[];
@@ -9,6 +17,7 @@ interface ChatState {
   setMessageStatus: (id: string, status: ChatMessageStatus) => void;
   finishMessage: (id: string, meta: ChatDoneMeta) => void;
   failMessage: (id: string, error: ChatStreamError) => void;
+  markActionUsed: (id: string, action: ChatAction) => void;
   setStreaming: (isStreaming: boolean) => void;
 }
 
@@ -23,7 +32,8 @@ function updateMessage(
 export const useChat = create<ChatState>((set) => ({
   messages: [],
   isStreaming: false,
-  addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
+  addMessage: (message) =>
+    set((state) => ({ messages: [...state.messages, message].slice(-MAX_MESSAGES) })),
   appendToken: (id, token) =>
     set((state) => ({
       messages: updateMessage(state.messages, id, (message) => ({
@@ -41,6 +51,12 @@ export const useChat = create<ChatState>((set) => ({
         ...message,
         meta,
         status: "complete",
+        request: message.request
+          ? {
+              query: meta.query ?? message.request.query,
+              retrievalQuery: meta.retrieval_query ?? message.request.retrievalQuery,
+            }
+          : undefined,
       })),
     })),
   failMessage: (id, error) =>
@@ -49,6 +65,13 @@ export const useChat = create<ChatState>((set) => ({
         ...message,
         error,
         status: "error",
+      })),
+    })),
+  markActionUsed: (id, action) =>
+    set((state) => ({
+      messages: updateMessage(state.messages, id, (message) => ({
+        ...message,
+        actionState: { ...message.actionState, [action]: true },
       })),
     })),
   setStreaming: (isStreaming) => set({ isStreaming }),

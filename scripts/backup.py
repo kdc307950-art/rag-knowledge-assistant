@@ -1,7 +1,7 @@
 """Create, verify, and restore offline runtime-data snapshots.
 
 Chroma/HNSW does not provide an application-level hot snapshot contract here.
-The CLI therefore requires an explicit confirmation that Streamlit and FastAPI
+The CLI therefore requires an explicit confirmation that FastAPI and other
 writers are stopped before create or restore operations.
 """
 
@@ -168,7 +168,7 @@ def create_backup(
     now: datetime | None = None,
 ) -> Path:
     if not confirm_stopped:
-        raise BackupError("Stop Streamlit/FastAPI writers and pass --confirm-stopped")
+        raise BackupError("Stop FastAPI and other writers, then pass --confirm-stopped")
     data_dir = data_dir.expanduser().resolve()
     backup_root = backup_root.expanduser().resolve()
     if not data_dir.is_dir():

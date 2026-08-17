@@ -1,8 +1,8 @@
 import { useRef } from "react";
 import { ApiError } from "../api/client";
-import { streamChat } from "../api/sse";
+import { streamChat, streamDraft, streamGeneral, type StreamOptions } from "../api/sse";
 import { useChat } from "../store/chat";
-import type { ChatMessage } from "../types";
+import type { ChatAction, ChatMessage } from "../types";
 import ChatInput from "./ChatInput";
 import MessageList from "./MessageList";
 
@@ -24,6 +24,13 @@ function unexpectedStreamError(error: unknown) {
   return { code: "stream_error", message: "流式回答异常结束，请重试。", partial: false };
 }
 
+interface StreamRun {
+  query: string;
+  retrievalQuery?: string;
+  action?: ChatAction;
+  originMessageId?: string;
+}
+
 export default function ChatPanel() {
   const messages = useChat((state) => state.messages);
   const isStreaming = useChat((state) => state.isStreaming);
@@ -32,11 +39,12 @@ export default function ChatPanel() {
   const setMessageStatus = useChat((state) => state.setMessageStatus);
   const finishMessage = useChat((state) => state.finishMessage);
   const failMessage = useChat((state) => state.failMessage);
+  const markActionUsed = useChat((state) => state.markActionUsed);
   const setStreaming = useChat((state) => state.setStreaming);
   const controllerRef = useRef<AbortController | null>(null);
   const activeRunRef = useRef(0);
 
-  const submit = (query: string) => {
+  const runStream = ({ query, retrievalQuery = query, action, originMessageId }: StreamRun) => {
     if (controllerRef.current) {
       return;
     }
@@ -44,22 +52,24 @@ export default function ChatPanel() {
     const runId = activeRunRef.current + 1;
     activeRunRef.current = runId;
     const controller = new AbortController();
-    const userMessage: ChatMessage = { id: newMessageId(), role: "user", content: query };
     const assistantMessage: ChatMessage = {
       id: newMessageId(),
       role: "assistant",
       content: "",
       status: "streaming",
+      action,
+      request: action ? undefined : { query, retrievalQuery },
     };
 
     controllerRef.current = controller;
-    addMessage(userMessage);
+    if (!action) {
+      addMessage({ id: newMessageId(), role: "user", content: query });
+    }
     addMessage(assistantMessage);
     setStreaming(true);
 
     const isCurrent = () => activeRunRef.current === runId && !controller.signal.aborted;
-
-    void streamChat(query, {
+    const callbacks: StreamOptions = {
       signal: controller.signal,
       onToken: (token) => {
         if (isCurrent()) {
@@ -69,6 +79,9 @@ export default function ChatPanel() {
       onDone: (meta) => {
         if (isCurrent()) {
           finishMessage(assistantMessage.id, meta);
+          if (originMessageId && action) {
+            markActionUsed(originMessageId, action);
+          }
         }
       },
       onError: (error) => {
@@ -77,7 +90,14 @@ export default function ChatPanel() {
           failMessage(assistantMessage.id, error);
         }
       },
-    })
+    };
+    const stream = action === "general"
+      ? streamGeneral(query, callbacks)
+      : action === "draft"
+        ? streamDraft(query, retrievalQuery, callbacks)
+        : streamChat(query, callbacks);
+
+    void stream
       .catch((error: unknown) => {
         if (activeRunRef.current !== runId) {
           return;
@@ -97,6 +117,22 @@ export default function ChatPanel() {
       });
   };
 
+  const submit = (query: string) => {
+    runStream({ query });
+  };
+
+  const runAction = (message: ChatMessage, action: ChatAction) => {
+    if (!message.request) {
+      return;
+    }
+    runStream({
+      query: message.request.query,
+      retrievalQuery: message.request.retrievalQuery,
+      action,
+      originMessageId: message.id,
+    });
+  };
+
   const stop = () => {
     const controller = controllerRef.current;
     if (!controller) {
@@ -107,7 +143,7 @@ export default function ChatPanel() {
 
   return (
     <section className="mx-auto flex h-full w-full max-w-5xl flex-col bg-gray-50">
-      <MessageList messages={messages} />
+      <MessageList messages={messages} isStreaming={isStreaming} onAction={runAction} />
       <ChatInput isStreaming={isStreaming} onSubmit={submit} onStop={stop} />
     </section>
   );

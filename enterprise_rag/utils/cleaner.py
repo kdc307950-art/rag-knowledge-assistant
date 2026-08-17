@@ -17,7 +17,7 @@ def _clean_text(original: str) -> str:
     return text.strip()
 
 # 清洗缓存只优化重复 Markdown 渲染；lru_cache 自带线程安全与有界淘汰，
-# 替代原 st.session_state 的 cleaned_cache（进程级共享）。
+# 使用有界进程级缓存，避免把清洗结果绑定到 UI 会话。
 @lru_cache(maxsize=MAX_CLEANED_CACHE_SIZE)
 def _clean_cached(original: str) -> str:
     return _clean_text(original)

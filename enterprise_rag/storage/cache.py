@@ -14,7 +14,7 @@ DEFAULT_CACHE_PATH = RUNTIME_DATA_DIR / "answer_cache.sqlite3"
 
 
 class PersistentAnswerCache:
-    """适用于单例Streamlit部署的小型进程安全缓存."""
+    """适用于单进程 FastAPI 部署的小型进程安全缓存。"""
 
     def __init__(
         self,
@@ -31,7 +31,7 @@ class PersistentAnswerCache:
         self._clock = clock
 
     def _connect(self) -> sqlite3.Connection:
-        # WAL 模式允许读取与短事务写入并存，适合单进程 Streamlit 部署。
+        # WAL 模式允许读取与短事务写入并存，适合单进程 API 部署。
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.db_path, timeout=10)
         connection.execute("PRAGMA journal_mode=WAL")

@@ -124,6 +124,19 @@ def test_meta_payload_keeps_failure_flags():
     assert payload["error_code"] == "authentication"
 
 
+def test_meta_payload_keeps_canonical_draft_inputs():
+    class Rag:
+        _last_meta = {
+            "query": "帮我写请假邮件",
+            "retrieval_query": "请假制度",
+        }
+
+    payload = chat._meta_payload(Rag())
+
+    assert payload["query"] == "帮我写请假邮件"
+    assert payload["retrieval_query"] == "请假制度"
+
+
 def test_only_successful_done_content_is_persisted():
     assert chat._should_persist_history(chat._StreamOutcome("done"), "完整回答")
     assert not chat._should_persist_history(chat._StreamOutcome("error"), "部分回答")

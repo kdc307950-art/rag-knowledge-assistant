@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatStreamError } from "./types";
+import type { ChatAction, ChatMessage, ChatStreamError } from "./types";
 
 const STREAM_ERROR_TITLES: Record<string, string> = {
   authentication: "模型服务鉴权失败",
@@ -20,13 +20,42 @@ export function messageStatusLabel(message: ChatMessage) {
   if (message.meta?.is_kb_busy) return "知识库正在更新，本次未执行检索。";
   if (message.meta?.is_reject) return "严格知识库模式：未找到可引用资料。";
   if (message.meta?.is_kb_stale) return "知识库已更新，此回答未写入缓存。";
+  if (message.meta?.is_general) return "通用办公回答，未依据企业知识库。";
+  if (message.meta?.is_draft) return "基于当前资料起草。";
   return null;
+}
+
+export function messageActions(message: ChatMessage): ChatAction[] {
+  if (message.role !== "assistant" || message.status !== "complete" || !message.meta) {
+    return [];
+  }
+
+  const actions: ChatAction[] = [];
+  if (
+    message.meta.fallback_allowed
+    && !message.actionState?.general
+    && !message.meta.is_kb_busy
+  ) {
+    actions.push("general");
+  }
+  if (
+    message.meta.draft_allowed
+    && message.meta.is_kb === true
+    && !message.meta.is_reject
+    && !message.meta.is_kb_busy
+    && !message.meta.is_kb_stale
+    && !message.actionState?.draft
+  ) {
+    actions.push("draft");
+  }
+  return actions;
 }
 
 export function messageSources(message: ChatMessage) {
   if (
     message.role !== "assistant"
     || message.meta?.is_kb !== true
+    || message.meta.is_general
     || message.meta.is_reject
     || message.meta.is_kb_busy
     || message.meta.is_kb_stale

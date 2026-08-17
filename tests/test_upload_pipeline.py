@@ -39,7 +39,7 @@ class FakeSlots:
 def test_multi_file_upload_is_staged_and_queued_without_full_memory_copy(
     monkeypatch, tmp_path
 ):
-    """多个小文件也必须立即入队，不在 Streamlit 主线程解析。"""
+    """多个小文件也必须立即入队，不在 API 事件循环线程解析。"""
     from enterprise_rag.services import document_service
 
     captured = {}
@@ -581,9 +581,6 @@ def test_destructive_operation_is_rejected_while_upload_batch_is_active(monkeypa
 
 def test_manifest_generation_change_invalidates_old_l1_and_l2_entries(monkeypatch, tmp_path):
     """manifest 换代后旧代际 key 的 L1/L2 条目都不得再被业务路径命中。"""
-    import streamlit as st
-
-    from enterprise_rag.core import state
     from enterprise_rag.services.cache_service import CacheService
     from enterprise_rag.storage.cache import PersistentAnswerCache
     from enterprise_rag.storage.kb_manifest import KnowledgeBaseManifest
@@ -592,8 +589,6 @@ def test_manifest_generation_change_invalidates_old_l1_and_l2_entries(monkeypatc
     manifest = KnowledgeBaseManifest(tmp_path / "manifest.sqlite3")
     manifest.mark_initialized()
     service = CacheService(persistent_cache=backend, manifest=manifest)
-    st.session_state.clear()
-    state.init_state()
     key = service.make_key("问题", "", kb_generation=0)
     service.set(key, {"content": "旧答案"}, expected_generation=0)
     assert service.get(key, expected_generation=0) == {"content": "旧答案"}

@@ -583,7 +583,7 @@ def get_document_count() -> int:
 
 
 def update_doc_count() -> None:
-    """在 Streamlit 脚本线程中刷新文档数、知识块数与向量库状态。"""
+    """刷新文档数、知识块数与向量库状态。"""
     from ..core.state import get_state, set_state
 
     healthy, vector_status = get_vector_store_health()

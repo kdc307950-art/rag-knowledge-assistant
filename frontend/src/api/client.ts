@@ -1,6 +1,7 @@
 // fetch 封装：统一带认证与会话头，401 触发登出事件。
 const API_BASE = "/api";
 export const API_KEY_STORAGE_KEY = "apiKey";
+export const LOCAL_AUTH_STORAGE_KEY = "localAuth";
 export const SESSION_ID_STORAGE_KEY = "sessionId";
 
 export class ApiError extends Error {
@@ -15,6 +16,7 @@ export class ApiError extends Error {
 
 function unauthorized(): never {
   localStorage.removeItem(API_KEY_STORAGE_KEY);
+  localStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
   clearSessionId();
   window.dispatchEvent(new CustomEvent("auth:logout"));
   throw new ApiError(401, "unauthorized");

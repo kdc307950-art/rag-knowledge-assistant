@@ -26,8 +26,7 @@ logger = logging.getLogger(__name__)
 CACHE_SCHEMA_VERSION = "grounded-rag-v6"
 
 # 进程级 L1 缓存：跨会话共享、LRU 有界、线程安全。
-# 原实现基于 st.session_state（每浏览器会话隔离）；API 化后会话由
-# session_id 表达，L1 与 L2 语义保持一致（内部知识库答案无用户差异）。
+# API 化后缓存按知识库代际和查询摘要隔离；HTTP 会话由 backend.session 管理。
 _l1_cache: OrderedDict = OrderedDict()
 _l1_lock = threading.Lock()
 
