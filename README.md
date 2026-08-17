@@ -18,7 +18,7 @@
 
 ### 环境要求
 
-- Python `3.10+`
+- Python `3.10` 或 `3.11`（当前固定依赖不支持 Python 3.12）
 - Streamlit `1.61.1`
 - 已安装 `uv`
 - 可访问 OpenAI 兼容接口（默认配置兼容 DashScope）
@@ -237,6 +237,50 @@ data/                     所有运行数据的默认根目录
 - 侧栏的“文档数”按唯一文件统计，“知识块”按 Chroma 分块数量统计，两者不是同一指标。
 - 上传任务区分“新增、跳过、部分失败、全部失败”，重复且未变更的文件不会计为新增。
 
+### 离线备份与恢复
+
+Chroma/HNSW 在本项目中没有可靠的在线热快照契约。创建或恢复备份前必须停止 Streamlit、FastAPI 以及其他可能写入 `RAG_DATA_DIR` 的脚本，然后显式确认停写：
+
+```powershell
+uv run python scripts/backup.py create --confirm-stopped
+```
+
+备份先写入 `backups/.incomplete-*`，完成 SQLite `quick_check`、文件尺寸和 SHA-256 清单后再原子发布为 `backups/kb_YYYYMMDD_HHMMSS/`。默认保留最近 7 份；`upload_staging/` 属于未提交工作，不进入备份。检查已有备份：
+
+```powershell
+uv run python scripts/backup.py verify backups\kb_YYYYMMDD_HHMMSS
+```
+
+恢复会先校验完整性，再把当前数据目录改名保留为 `data.pre-restore-<时间戳>`，不会直接删除旧数据：
+
+```powershell
+uv run python scripts/backup.py restore backups\kb_YYYYMMDD_HHMMSS `
+  --confirm-stopped --confirm-replace
+```
+
+至少完成一次非生产目录恢复演练，不能只验证“备份命令返回成功”：
+
+```powershell
+uv run python scripts/backup.py restore backups\kb_YYYYMMDD_HHMMSS `
+  --data-dir .verify_tmp\restore-drill-data `
+  --confirm-stopped --confirm-replace
+$env:RAG_DATA_DIR = "$PWD\.verify_tmp\restore-drill-data"
+uv run python -c "from enterprise_rag.storage.vector_store import get_vector_store_health; print(get_vector_store_health())"
+Remove-Item Env:RAG_DATA_DIR
+```
+
+Windows 任务计划只应安排在明确的停写窗口；不要为了“每日自动”而在应用运行时复制 HNSW 文件。
+
+### API 自检
+
+FastAPI 启动后会在后台执行一次不阻塞服务启动的轻量自检。`GET /api/diagnostics` 聚合以下状态，React 顶栏使用同一接口展示：
+
+- Embedding/Reranker：区分已加载、本地可用和缺失，不为自检主动加载模型；
+- 向量库：真实读取 Chroma/HNSW；
+- manifest：比较激活来源数和声明分块数与当前可见 Chroma 计数；
+- LLM：只检查本地 Key 与模型配置，`network_verified=false`，不会产生模型调用费用；
+- 错误摘要：读取 `error.log` 尾部，返回最近 24 小时计数和最多 3 条二次脱敏摘要。
+
 ### 部署边界
 
 - `.streamlit/config.toml` 默认绑定 `127.0.0.1`，只允许本机访问。
@@ -266,6 +310,9 @@ Get-Content "$env:RAG_DATA_DIR\logs\error.log" -Tail 50
 当前测试覆盖：
 
 - 模块导入和启动烟测
+- FastAPI SSE 跨线程投递、断连检测、唯一终态和失败历史隔离
+- 离线原子备份、SHA-256 篡改检测、保留策略和恢复回滚
+- 聚合诊断、manifest/Chroma 一致性、错误摘要脱敏和 API 鉴权
 - RAG-First 路由与严格拒答
 - 历史改写边界
 - 向量/BM25 检索、重排和来源元数据
@@ -276,7 +323,7 @@ Get-Content "$env:RAG_DATA_DIR\logs\error.log" -Tail 50
 - DashScope 专用 Key 与通用 OpenAI 兼容 Key 的选择规则
 - 在线、离线缓存、本地模型目录和缺失模型的就绪检测
 
-当前完整测试基线：`135 passed`。
+当前完整测试基线：`161 passed`。
 
 其中包含真实临时 Chroma + SQLite manifest 的一致性测试：未提交 staging 不可见、完整/残缺 staging 重试、旧版本清理失败隔离、manifest 代际传播、上传期间向量/混合查询熔断、BM25 最终候选二次可见性过滤，以及缓存 L1/L2 命中和写入期间代际变化时 fail closed。
 

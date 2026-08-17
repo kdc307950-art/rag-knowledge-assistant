@@ -122,3 +122,12 @@ def test_meta_payload_keeps_failure_flags():
     assert payload["action_failed"] is True
     assert payload["is_interrupted"] is True
     assert payload["error_code"] == "authentication"
+
+
+def test_only_successful_done_content_is_persisted():
+    assert chat._should_persist_history(chat._StreamOutcome("done"), "完整回答")
+    assert not chat._should_persist_history(chat._StreamOutcome("error"), "部分回答")
+    assert not chat._should_persist_history(
+        chat._StreamOutcome("disconnected"), "部分回答"
+    )
+    assert not chat._should_persist_history(chat._StreamOutcome("done"), "")

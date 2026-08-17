@@ -60,6 +60,10 @@ class _StreamOutcome:
     terminal: str | None = None
 
 
+def _should_persist_history(outcome: _StreamOutcome, content: str) -> bool:
+    return outcome.terminal == "done" and bool(content)
+
+
 def _select_history(query: str, messages: list[dict]) -> str:
     """与 ChatService 相同的历史选择语义：仅指代型追问携带历史。"""
     recent = build_history(messages, max_entries=3, max_length_per_msg=300) or ""
@@ -234,7 +238,7 @@ async def chat(
         async for chunk in event_stream():
             yield chunk
         full = "".join(collected)
-        if outcome.terminal == "done" and full:
+        if _should_persist_history(outcome, full):
             append_message(session_id, "user", req.query)
             append_message(session_id, "assistant", full)
 
