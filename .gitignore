@@ -23,3 +23,15 @@ enterprise_rag/kb_data/
 # Local temporary output
 .pytest-tmp-*/
 *.log
+backups/
+.api_test_data/
+.pytest_run/
+.verify_tmp/
+pure_chroma_probe/
+
+# Local audit/probe scripts
+/_api_smoke.py
+/_diag*.py
+/_faulthandler_diag.py
+/_pure_chroma.py
+/_step3.py
