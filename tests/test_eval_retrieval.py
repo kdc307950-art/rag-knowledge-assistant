@@ -60,6 +60,7 @@ def test_evaluator_calls_retrieval_directly_and_calculates_metrics(monkeypatch, 
     assert report["metrics"]["mrr"] == 1.0
     assert report["metrics"]["refusal_accuracy"] == 1.0
     assert report["metrics"]["answerable_false_refusal_rate"] == 0.0
+    assert report["metrics"]["evidence_recall_at_1"] is None
 
 
 def test_evaluator_rejects_ambiguous_case_schema(tmp_path):
@@ -87,3 +88,29 @@ def test_evaluator_rejects_ambiguous_case_schema(tmp_path):
         assert "expected_sources" in str(exc)
     else:
         raise AssertionError("ambiguous case should be rejected")
+
+
+def test_v2_requires_evidence_and_scores_parent_anchor(monkeypatch, tmp_path):
+    from scripts import eval_retrieval
+
+    cases_path = tmp_path / "v2.jsonl"
+    cases_path.write_text(
+        json.dumps({
+            "schema_version": 2,
+            "case_id": "evidence",
+            "query": "命中",
+            "tags": ["proper_noun"],
+            "expected_sources": ["a.txt"],
+            "expected_evidence": [{"source": "a.txt", "parent_id": "p1"}],
+            "expected_refusal": False,
+        }, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        eval_retrieval, "retrieve_context",
+        lambda *_args, **_kwargs: ("context", ["a.txt"], [{"source": "a.txt", "parent_id": "p1", "rerank_score": 0.9}]),
+    )
+
+    report = eval_retrieval.evaluate(cases_path)
+
+    assert report["metrics"]["evidence_recall_at_1"] == 1.0
+    assert report["metrics"]["evidence_mrr"] == 1.0

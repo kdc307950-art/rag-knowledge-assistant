@@ -35,7 +35,8 @@ from enterprise_rag.core.exceptions import KnowledgeBaseBusyError  # noqa: E402
 from enterprise_rag.rag.retriever import retrieve_context  # noqa: E402
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSIONS = {1, SCHEMA_VERSION}
 K_VALUES = (1, 3, 5)
 SUPPORTED_TAGS = {
     "no_answer",
@@ -59,8 +60,9 @@ def _load_cases(path: Path) -> tuple[list[dict[str, Any]], str]:
             raise ValueError(f"{path}:{line_number} 不是有效 JSONL: {exc}") from exc
         if not isinstance(record, dict):
             raise ValueError(f"{path}:{line_number} 必须是 JSON 对象")
-        if record.get("schema_version") != SCHEMA_VERSION:
-            raise ValueError(f"{path}:{line_number} schema_version 必须为 {SCHEMA_VERSION}")
+        schema_version = record.get("schema_version")
+        if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+            raise ValueError(f"{path}:{line_number} schema_version 必须为 1 或 {SCHEMA_VERSION}")
         if not str(record.get("case_id") or "").strip():
             raise ValueError(f"{path}:{line_number} 缺少 case_id")
         if not str(record.get("query") or "").strip():
@@ -72,6 +74,19 @@ def _load_cases(path: Path) -> tuple[list[dict[str, Any]], str]:
         if not isinstance(expected_sources, list) or any(not str(item).strip() for item in expected_sources):
             raise ValueError(f"{path}:{line_number} expected_sources 必须是字符串数组")
         expected_refusal = bool(record.get("expected_refusal", False))
+        expected_evidence = record.get("expected_evidence") or []
+        if not isinstance(expected_evidence, list):
+            raise ValueError(f"{path}:{line_number} expected_evidence 必须是数组")
+        for evidence in expected_evidence:
+            if not isinstance(evidence, dict) or not str(evidence.get("source") or "").strip():
+                raise ValueError(f"{path}:{line_number} expected_evidence 每项必须包含 source")
+            anchors = [evidence.get(name) for name in ("parent_id", "chapter", "paragraph")]
+            if not any(value is not None and str(value).strip() for value in anchors):
+                raise ValueError(
+                    f"{path}:{line_number} expected_evidence 需要 parent_id/chapter/paragraph 锚点"
+                )
+        if schema_version == SCHEMA_VERSION and not expected_refusal and not expected_evidence:
+            raise ValueError(f"{path}:{line_number} v2 可回答案例必须人工标注 expected_evidence")
         if expected_refusal and expected_sources:
             raise ValueError(f"{path}:{line_number} 拒答案例不能同时指定 expected_sources")
         if not expected_refusal and not expected_sources and "no_answer" not in tags:
@@ -83,6 +98,8 @@ def _load_cases(path: Path) -> tuple[list[dict[str, Any]], str]:
         record["tags"] = tags
         record["expected_sources"] = [str(item) for item in expected_sources]
         record["expected_refusal"] = expected_refusal
+        record["expected_evidence"] = expected_evidence
+        record["schema_version"] = schema_version
         records.append(record)
     if not records:
         raise ValueError(f"{path} 没有可评估案例；golden set 需要人工标注后再运行")
@@ -96,6 +113,26 @@ def _sources_at(raw_results: list[dict[str, Any]], k: int) -> set[str]:
         for item in raw_results[:k]
         if str(item.get("source") or "").strip()
     }
+
+
+def _evidence_matches(expected: dict[str, Any], result: dict[str, Any]) -> bool:
+    if str(expected.get("source") or "") != str(result.get("source") or ""):
+        return False
+    for field in ("parent_id", "chapter", "paragraph"):
+        value = expected.get(field)
+        if value is not None and str(value).strip() and str(value) != str(result.get(field) or ""):
+            return False
+    return True
+
+
+def _evidence_at(raw_results: list[dict[str, Any]], k: int, expected: list[dict[str, Any]]) -> float | None:
+    if not expected:
+        return None
+    matched = sum(
+        any(_evidence_matches(item, result) for result in raw_results[:k])
+        for item in expected
+    )
+    return matched / len(expected)
 
 
 def _evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
@@ -126,6 +163,7 @@ def _evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
 
     ranked_sources = [str(item.get("source") or "") for item in raw_results]
     expected = set(case["expected_sources"])
+    expected_evidence = case.get("expected_evidence", [])
     is_refusal = not bool(raw_results)
     recalls: dict[str, float | None] = {}
     for k in K_VALUES:
@@ -142,6 +180,12 @@ def _evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
             if source in expected:
                 reciprocal_rank = 1.0 / index
                 break
+    evidence_reciprocal_rank = 0.0
+    if expected_evidence:
+        for index, result in enumerate(raw_results, 1):
+            if any(_evidence_matches(item, result) for item in expected_evidence):
+                evidence_reciprocal_rank = 1.0 / index
+                break
 
     return {
         "case_id": case["case_id"],
@@ -149,13 +193,27 @@ def _evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
         "expected_refusal": bool(case["expected_refusal"]),
         "actual_refusal": is_refusal,
         "expected_sources": case["expected_sources"],
+        "expected_evidence": expected_evidence,
         "ranked_sources": ranked_sources[:FINAL_TOP_K],
+        "ranked_evidence": [
+            {
+                "source": item.get("source"),
+                "parent_id": item.get("parent_id"),
+                "chapter": item.get("chapter"),
+                "paragraph": item.get("paragraph"),
+            }
+            for item in raw_results[:FINAL_TOP_K]
+        ],
         "top_score": max(
             (float(item.get("rerank_score", 0.0)) for item in raw_results),
             default=0.0,
         ),
         "recall": recalls,
         "reciprocal_rank": reciprocal_rank,
+        "evidence_recall": {
+            str(k): _evidence_at(raw_results, k, expected_evidence) for k in K_VALUES
+        },
+        "evidence_reciprocal_rank": evidence_reciprocal_rank,
     }
 
 
@@ -170,6 +228,19 @@ def evaluate(cases_path: Path) -> dict[str, Any]:
         metrics[f"recall_at_{k}"] = sum(values) / len(values) if values else None
     reciprocal_ranks = [item["reciprocal_rank"] for item in answerable]
     metrics["mrr"] = sum(reciprocal_ranks) / len(reciprocal_ranks) if reciprocal_ranks else None
+    evidence_cases = [item for item in answerable if item.get("expected_evidence")]
+    for k in K_VALUES:
+        values = [
+            item["evidence_recall"][str(k)]
+            for item in evidence_cases
+            if item["evidence_recall"][str(k)] is not None
+        ]
+        metrics[f"evidence_recall_at_{k}"] = sum(values) / len(values) if values else None
+    evidence_ranks = [item["evidence_reciprocal_rank"] for item in evidence_cases]
+    metrics["evidence_mrr"] = (
+        sum(evidence_ranks) / len(evidence_ranks) if evidence_ranks else None
+    )
+    metrics["evidence_evaluable_count"] = len(evidence_cases)
     metrics["refusal_accuracy"] = (
         sum(item.get("actual_refusal") is True for item in refusal_cases) / len(refusal_cases)
         if refusal_cases

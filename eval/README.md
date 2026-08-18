@@ -7,10 +7,11 @@ reconstructed source and its original encoding is not reliable.
 
 ## Case Schema
 
-Create `eval/retrieval_cases.jsonl` with one object per line:
+Create `eval/retrieval_cases.jsonl` with one object per line. Use schema v2 for
+new cases so a single large source can be evaluated at evidence level:
 
 ```json
-{"schema_version":1,"case_id":"policy-001","query":"...","tags":["proper_noun"],"expected_sources":["policy.txt"],"expected_refusal":false}
+{"schema_version":2,"case_id":"policy-001","query":"...","tags":["proper_noun"],"expected_sources":["policy.txt"],"expected_evidence":[{"source":"policy.txt","chapter":"报销"}],"expected_refusal":false}
 ```
 
 Allowed tags are `no_answer`, `multi_document`, `proper_noun`,
@@ -19,9 +20,13 @@ Allowed tags are `no_answer`, `multi_document`, `proper_noun`,
 it by design; query rewriting must be evaluated separately.
 
 Refusal cases set `expected_refusal: true` and leave `expected_sources` empty.
-Answerable cases list one or more exact source names from the document
-metadata. The set must be manually reviewed against the real source files;
-synthetic or guessed labels are not a valid baseline.
+Answerable v2 cases list one or more exact source names and manually reviewed
+`expected_evidence` anchors (`parent_id`, `chapter`, or `paragraph`). Source
+Recall is only a coarse document-level signal; evidence Recall/MRR is the
+primary metric when the knowledge base contains one large source document. The
+set must be manually reviewed against the real source files; synthetic or
+guessed labels are not a valid baseline. v1 remains readable for migration but
+does not produce evidence metrics.
 
 ## Run
 
