@@ -188,6 +188,7 @@ data/                     所有运行数据的默认根目录
 | --- | --- | --- |
 | `OPENAI_BASE_URL` | DashScope 兼容地址 | LLM 服务地址 |
 | `OPENAI_MODEL` | `qwen3.7-max` | LLM 模型名称 |
+| `LLM_STREAM_USAGE_MODE` | `auto` | 流式 usage 采集：`auto` 仅对 DashScope 开启，`on`/`off` 可显式覆盖 |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-zh-v1.5` | 向量模型 |
 | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | 重排模型 |
 | `HF_HUB_OFFLINE` | `0` | `1` 时禁止在线下载 Hugging Face 模型 |
@@ -204,6 +205,9 @@ data/                     所有运行数据的默认根目录
 | `ACCESS_LOG_RETENTION_DAYS` | `7` | access.log 按时间清理的天数 |
 | `AUDIT_LOG_RETENTION_DAYS` | `90` | audit.log 按时间清理的天数 |
 | `HEALTH_AUTH_FAILURE_MIN` | `2` | 最近健康检查窗口内触发模型鉴权告警所需的最少失败次数 |
+| `HEALTH_SLOW_REQUEST_MS` | `60000` | 普通请求总耗时达到该毫秒数时计入慢请求 |
+| `HEALTH_SLOW_LLM_MS` | `30000` | `llm_ms` 阶段达到该毫秒数时计入慢 LLM；SSE 不使用连接总时长 |
+| `HEALTH_SLOW_MIN_COUNT` | `3` | 最近健康检查窗口内触发慢请求告警所需的最少条数 |
 | `CACHE_SALT` | 空 | 回答缓存键的可选 HMAC 盐值 |
 | `INITIAL_RETRIEVAL_K` | `50` | 初始候选数量 |
 | `FINAL_TOP_K` | `8` | 最终上下文片段数量 |
@@ -301,7 +305,7 @@ FastAPI 启动后会在后台执行一次不阻塞服务启动的轻量自检。
 
 - `GET /api/live`：不鉴权的进程存活探针。
 - `GET /api/ready`：不鉴权的依赖就绪探针；离线模式下模型不可用、依赖异常或 manifest 不一致返回 `503`，在线模式允许首次使用时下载模型，空知识库仍是合法就绪状态。
-- `GET /metrics`：Prometheus 文本格式；使用独立 `METRICS_TOKEN` 或仅允许 loopback。指标包括 HTTP/SSE 终态、首 token 延迟、LLM 调用、L1/L2 缓存、上传终态、鉴权失败和知识库快照。
+- `GET /metrics`：Prometheus 文本格式；使用独立 `METRICS_TOKEN` 或仅允许 loopback。指标包括 HTTP/SSE 终态、首 token 延迟、LLM 调用与供应商返回的 input/output token（缺失时不猜测）、L1/L2 缓存、上传终态、鉴权失败、检索 hit/empty/error/busy、最终片段数、rerank top score、严格拒答和知识库快照。token 计数不是费用估算，费用需要单独配置价格表。
 - `rag_llm_calls_total` 按 SDK 实际调用 attempt 计数；临时网络/限流重试会产生多个 attempt，不等同于用户逻辑请求数。
 - 每个响应带服务端生成的 `X-Request-Id`。SSE 的 HTTP 状态通常为 `200`，业务错误必须看 `error`/`interrupted` 终态；当前无法可靠区分用户主动停止和网络断开。
 - 请求上下文内的 `app.log`/`error.log` 会写入同一 `request_id`；健康检查按请求去重模型鉴权失败链路，避免一次失败的多层包装触发假告警。

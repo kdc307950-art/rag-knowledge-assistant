@@ -120,6 +120,7 @@ class _MetricSet:
     sse_duration: _Histogram
     llm_calls: _Counter
     llm_latency: _Histogram
+    llm_tokens: _Counter
     cache_hits: _Counter
     cache_misses: _Counter
     errors: _Counter
@@ -130,6 +131,11 @@ class _MetricSet:
     chunks_count: _Gauge
     vector_health: _Gauge
     sse_active: _Gauge
+    retrievals: _Counter
+    retrieval_results: _Histogram
+    retrieval_top_score: _Histogram
+    refusals: _Counter
+    kb_busy: _Counter
 
 
 class MetricsRegistry:
@@ -183,6 +189,9 @@ class MetricsRegistry:
             llm_latency=self._register(
                 _Histogram("rag_llm_latency_seconds", "LLM latency", ("mode",), duration_buckets + (120, 300))
             ),
+            llm_tokens=self._register(
+                _Counter("rag_llm_tokens_total", "LLM token usage", ("type", "mode"))
+            ),
             cache_hits=self._register(
                 _Counter("rag_cache_hits_total", "Cache hits", ("level",))
             ),
@@ -203,6 +212,27 @@ class MetricsRegistry:
             chunks_count=self._register(_Gauge("rag_chunks_count", "Knowledge base chunk count", ())),
             vector_health=self._register(_Gauge("rag_vector_health", "Vector store health", ())),
             sse_active=self._register(_Gauge("rag_sse_active_connections", "Active SSE connections", ("route",))),
+            retrievals=self._register(
+                _Counter("rag_retrievals_total", "Retrieval outcomes", ("outcome",))
+            ),
+            retrieval_results=self._register(
+                _Histogram(
+                    "rag_retrieval_results_histogram",
+                    "Final retrieval result count",
+                    (),
+                    (0, 1, 2, 3, 4, 5, 8, 10, 20, 50),
+                )
+            ),
+            retrieval_top_score=self._register(
+                _Histogram(
+                    "rag_retrieval_top_score_histogram",
+                    "Top final rerank score",
+                    (),
+                    (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 2.0, 5.0, 10.0),
+                )
+            ),
+            refusals=self._register(_Counter("rag_refusals_total", "Strict knowledge-base refusals", ())),
+            kb_busy=self._register(_Counter("rag_kb_busy_total", "Knowledge-base busy gates", ("reason",))),
         )
 
     def reset(self) -> None:
@@ -326,6 +356,61 @@ def mark_llm_call(mode: str, duration: float | None = None) -> None:
         registry.metrics.llm_calls.inc(1, mode)
         if duration is not None:
             registry.metrics.llm_latency.observe(duration, mode)
+
+
+def mark_llm_tokens(token_type: str, amount: int | float, mode: str) -> None:
+    """Record provider-reported input/output tokens only.
+
+    Missing or malformed provider usage is intentionally ignored. This metric
+    is a count signal, not a cost estimate; pricing requires a separate,
+    explicitly configured price table.
+    """
+    normalized_type = str(token_type or "").strip().lower()
+    if normalized_type not in {"input", "output"}:
+        return
+    try:
+        value = float(amount)
+    except (TypeError, ValueError):
+        return
+    if not math.isfinite(value) or value < 0:
+        return
+    with registry._lock:
+        registry.metrics.llm_tokens.inc(value, normalized_type, str(mode or "unknown"))
+
+
+def mark_retrieval(outcome: str, results_count: int = 0, top_score: float | None = None) -> None:
+    """Record one retrieval decision using bounded, semantic outcomes."""
+    normalized = str(outcome or "unknown").strip().lower()
+    if normalized not in {"hit", "empty", "error", "busy"}:
+        normalized = "error"
+    try:
+        count = max(0, int(results_count))
+    except (TypeError, ValueError):
+        count = 0
+    with registry._lock:
+        registry.metrics.retrievals.inc(1, normalized)
+        if normalized in {"hit", "empty"}:
+            registry.metrics.retrieval_results.observe(count)
+            if top_score is not None:
+                try:
+                    score = float(top_score)
+                except (TypeError, ValueError):
+                    score = -1.0
+                if math.isfinite(score) and score >= 0:
+                    registry.metrics.retrieval_top_score.observe(score)
+
+
+def mark_refusal() -> None:
+    with registry._lock:
+        registry.metrics.refusals.inc(1)
+
+
+def mark_kb_busy(reason: str = "retrieval") -> None:
+    normalized = str(reason or "unknown").strip().lower()
+    if normalized not in {"retrieval", "uploading", "mutating", "unknown"}:
+        normalized = "unknown"
+    with registry._lock:
+        registry.metrics.kb_busy.inc(1, normalized)
 
 
 def mark_upload_result(result: str) -> None:

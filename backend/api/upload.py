@@ -8,6 +8,7 @@ from starlette.concurrency import run_in_threadpool
 
 from enterprise_rag.services.document_service import DocumentService
 from enterprise_rag.utils.logger import log_audit_event
+from backend.observability.metrics import mark_kb_busy
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -39,6 +40,8 @@ async def upload(files: list[UploadFile] = File(...)):
         raise HTTPException(status_code=400, detail="未收到有效文件内容")
     result = await run_in_threadpool(DocumentService().process_uploads, adapted)
     if not result.get("success"):
+        if result.get("busy"):
+            mark_kb_busy("uploading")
         log_audit_event(
             "upload_rejected",
             file_count=len(adapted),

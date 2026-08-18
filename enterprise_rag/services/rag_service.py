@@ -27,6 +27,34 @@ except Exception:  # pragma: no cover - standalone core imports
 logger = logging.getLogger(__name__)
 
 
+def _record_retrieval(outcome: str, results_count: int = 0, top_score: float | None = None) -> None:
+    """Keep core retrieval usable when the API observability package is absent."""
+    try:
+        from backend.observability.metrics import mark_retrieval
+
+        mark_retrieval(outcome, results_count, top_score)
+    except Exception:
+        logger.debug("记录检索指标失败", exc_info=True)
+
+
+def _record_refusal() -> None:
+    try:
+        from backend.observability.metrics import mark_refusal
+
+        mark_refusal()
+    except Exception:
+        logger.debug("记录拒答指标失败", exc_info=True)
+
+
+def _record_kb_busy(reason: str = "retrieval") -> None:
+    try:
+        from backend.observability.metrics import mark_kb_busy
+
+        mark_kb_busy(reason)
+    except Exception:
+        logger.debug("记录知识库忙碌指标失败", exc_info=True)
+
+
 def _general_failure_details(exc: Exception) -> tuple[str, str]:
     """把模型 SDK 异常转换为不泄露敏感信息的用户提示和审计代码。"""
     current: BaseException | None = exc
@@ -134,6 +162,8 @@ class RagService:
         except KnowledgeBaseBusyError as exc:
             # 不记录原始问题，避免日志落盘用户完整提问。
             logger.info("知识库更新期间暂停检索: query_length=%d", len(query))
+            _record_retrieval("busy")
+            _record_kb_busy("retrieval")
             return RetrievalDecision(
                 query=query,
                 retrieval_query=retrieval_query,
@@ -146,6 +176,7 @@ class RagService:
             )
         except Exception as exc:
             logger.exception("Knowledge-base retrieval failed")
+            _record_retrieval("error")
             return RetrievalDecision(
                 query=query,
                 retrieval_query=retrieval_query,
@@ -170,6 +201,11 @@ class RagService:
             len(query),
             len(raw_results),
             decision.max_score,
+        )
+        _record_retrieval(
+            "hit" if decision.has_results else "empty",
+            len(raw_results),
+            decision.max_score if raw_results else None,
         )
         return decision
 
@@ -392,6 +428,7 @@ class RagService:
             return
         if not decision.has_results:
             # 严格知识库模式下，没有可靠片段时不调用通用模型。
+            _record_refusal()
             content = self.reject(query)
             self._last_meta = {
                 "content": content,

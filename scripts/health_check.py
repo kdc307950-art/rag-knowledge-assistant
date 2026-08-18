@@ -24,7 +24,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from enterprise_rag.config import BACKUP_DIR, LOG_DIR, RUNTIME_DATA_DIR  # noqa: E402
+from enterprise_rag.config import (  # noqa: E402
+    BACKUP_DIR,
+    HEALTH_SLOW_LLM_MS,
+    HEALTH_SLOW_MIN_COUNT,
+    HEALTH_SLOW_REQUEST_MS,
+    LOG_DIR,
+    RUNTIME_DATA_DIR,
+)
 
 
 UTC = timezone.utc
@@ -34,6 +41,9 @@ DEFAULT_MIN_FREE_GB = 1.0
 DEFAULT_ERROR_RATE = 0.05
 DEFAULT_MIN_REQUESTS = 10
 DEFAULT_AUTH_FAILURE_MIN = 2
+DEFAULT_SLOW_REQUEST_MS = HEALTH_SLOW_REQUEST_MS
+DEFAULT_SLOW_LLM_MS = HEALTH_SLOW_LLM_MS
+DEFAULT_SLOW_MIN_COUNT = HEALTH_SLOW_MIN_COUNT
 COOLDOWN_SECONDS = 30 * 60
 
 
@@ -211,6 +221,120 @@ def access_error_rate(
     return {"name": "error_rate", "status": status, "detail": "threshold_exceeded" if status == "critical" else "within_threshold", "requests": total, "errors": errors, "rate": rate}
 
 
+def _duration_ms(record: dict[str, Any], name: str) -> float | None:
+    """Read a finite millisecond value from the current or legacy log shape."""
+
+    phases = record.get("phases")
+    value = phases.get(name) if isinstance(phases, dict) else record.get(name)
+    if value is None and name == "total_ms":
+        # Older access records only exposed duration_ms at the top level.
+        value = record.get("duration_ms")
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 and parsed != float("inf") and parsed != float("-inf") else None
+
+
+def check_slow_requests(
+    log_dir: Path,
+    *,
+    now: datetime | None = None,
+    window_minutes: int = DEFAULT_WINDOW_MINUTES,
+    request_threshold_ms: float = DEFAULT_SLOW_REQUEST_MS,
+    llm_threshold_ms: float = DEFAULT_SLOW_LLM_MS,
+    min_count: int = DEFAULT_SLOW_MIN_COUNT,
+) -> dict[str, Any]:
+    """Detect repeated slow completed requests without treating SSE lifetime as latency.
+
+    A normal request is slow when its total duration exceeds ``request_threshold_ms``;
+    an SSE request is evaluated by its ``llm_ms`` stage because ``total_ms`` is the
+    client-held stream lifetime. Interrupted streams are excluded from both counts.
+    """
+
+    cutoff = (now or _now()) - timedelta(minutes=max(0, int(window_minutes)))
+    request_threshold = max(0.0, float(request_threshold_ms))
+    llm_threshold = max(0.0, float(llm_threshold_ms))
+    threshold_count = max(1, int(min_count))
+    total = 0
+    normal_total = 0
+    sse_total = 0
+    slow = 0
+    slow_requests = 0
+    slow_sse = 0
+    slow_llm = 0
+
+    records: list[dict[str, Any]] = []
+    for path in sorted(log_dir.glob("access.log*")):
+        records.extend(_read_jsonl(path))
+    for record in records:
+        timestamp = _parse_time(record.get("timestamp"))
+        if timestamp is None or timestamp < cutoff:
+            continue
+        if record.get("route") == "/metrics":
+            continue
+        outcome = str(record.get("outcome", "")).strip().lower()
+        if outcome == "interrupted":
+            continue
+
+        route_type_value = record.get("route_type")
+        if route_type_value is None and record.get("sse_terminal") is not None:
+            # Keep compatibility with pre-route_type access records that still
+            # carry the middleware's SSE terminal marker.
+            route_type_value = "sse"
+        route_type = str(route_type_value or "request").strip().lower()
+        if route_type not in {"request", "sse"}:
+            route_type = "request"
+        total_ms = _duration_ms(record, "total_ms")
+        llm_ms = _duration_ms(record, "llm_ms")
+        total += 1
+        if route_type == "sse":
+            sse_total += 1
+            # Never use the full SSE connection lifetime as a slow-request signal.
+            is_slow = llm_ms is not None and llm_ms >= llm_threshold
+            if is_slow:
+                slow += 1
+                slow_sse += 1
+                slow_llm += 1
+            continue
+
+        normal_total += 1
+        slow_total = total_ms is not None and total_ms >= request_threshold
+        slow_stage = llm_ms is not None and llm_ms >= llm_threshold
+        if slow_total or slow_stage:
+            slow += 1
+            if slow_total:
+                slow_requests += 1
+            if slow_stage:
+                slow_llm += 1
+
+    status = "critical" if slow >= threshold_count else "ok"
+    if status == "critical":
+        detail = "threshold_exceeded"
+    elif total < threshold_count:
+        detail = "insufficient_sample"
+    else:
+        detail = "within_threshold"
+    return {
+        "name": "slow_requests",
+        "status": status,
+        "detail": detail,
+        "window_minutes": max(0, int(window_minutes)),
+        "requests": total,
+        "normal_requests": normal_total,
+        "sse_requests": sse_total,
+        "slow": slow,
+        "slow_requests": slow_requests,
+        "slow_sse": slow_sse,
+        "slow_llm": slow_llm,
+        "request_threshold_ms": request_threshold,
+        "llm_threshold_ms": llm_threshold,
+        "min_count": threshold_count,
+    }
+
+
 def model_auth_failure_count(
     log_dir: Path,
     *,
@@ -305,6 +429,9 @@ def run_checks(
     error_rate_threshold: float = DEFAULT_ERROR_RATE,
     error_min_requests: int = DEFAULT_MIN_REQUESTS,
     auth_failure_min: int = DEFAULT_AUTH_FAILURE_MIN,
+    slow_request_ms: float = DEFAULT_SLOW_REQUEST_MS,
+    slow_llm_ms: float = DEFAULT_SLOW_LLM_MS,
+    slow_min_count: int = DEFAULT_SLOW_MIN_COUNT,
 ) -> list[dict[str, Any]]:
     return [
         check_ready(ready_url, opener=opener),
@@ -320,6 +447,13 @@ def run_checks(
             log_dir,
             now=now,
             min_failures=auth_failure_min,
+        ),
+        check_slow_requests(
+            log_dir,
+            now=now,
+            request_threshold_ms=slow_request_ms,
+            llm_threshold_ms=slow_llm_ms,
+            min_count=slow_min_count,
         ),
     ]
 
@@ -495,6 +629,9 @@ def main(argv: list[str] | None = None) -> int:
         error_rate_threshold=max(0.0, float(os.getenv("HEALTH_ERROR_RATE_THRESHOLD", DEFAULT_ERROR_RATE))),
         error_min_requests=max(1, int(os.getenv("HEALTH_ERROR_MIN_REQUESTS", DEFAULT_MIN_REQUESTS))),
         auth_failure_min=max(1, int(os.getenv("HEALTH_AUTH_FAILURE_MIN", DEFAULT_AUTH_FAILURE_MIN))),
+        slow_request_ms=max(0.0, float(os.getenv("HEALTH_SLOW_REQUEST_MS", DEFAULT_SLOW_REQUEST_MS))),
+        slow_llm_ms=max(0.0, float(os.getenv("HEALTH_SLOW_LLM_MS", DEFAULT_SLOW_LLM_MS))),
+        slow_min_count=max(1, int(os.getenv("HEALTH_SLOW_MIN_COUNT", DEFAULT_SLOW_MIN_COUNT))),
     )
     notify(checks, state_path=args.state, alerts_path=args.alerts, webhook_url=os.getenv("ALERT_WEBHOOK_URL", ""))
     print(json.dumps({"ok": all(item.get("status") != "critical" for item in checks), "checks": checks}, ensure_ascii=False))

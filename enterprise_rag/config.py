@@ -64,6 +64,12 @@ if _legacy_kb_dir and Path(_legacy_kb_dir).expanduser() != KB_DATA_DIR:
 # =========================
 BASE_URL = os.getenv("OPENAI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 LLM_MODEL = os.getenv("OPENAI_MODEL", "qwen3.7-max")
+# ``auto`` enables terminal stream usage on DashScope only. Custom
+# OpenAI-compatible gateways must opt in explicitly because support for
+# ``stream_options`` is not part of every compatibility layer.
+LLM_STREAM_USAGE_MODE = os.getenv("LLM_STREAM_USAGE_MODE", "auto").strip().lower()
+if LLM_STREAM_USAGE_MODE not in {"auto", "on", "true", "1", "off", "false", "0"}:
+    LLM_STREAM_USAGE_MODE = "auto"
 MODEL_NAME = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
 # DashScope 与 OpenAI 可能同时配置在同一台机器上。连接 DashScope 时优先使用
 # 服务商专用变量，避免把全局 OPENAI_API_KEY 误发给 DashScope 并触发 401。
@@ -83,6 +89,11 @@ BACKUP_DIR = Path(os.getenv("RAG_BACKUP_DIR", str(PROJECT_ROOT / "backups"))).ex
 LOG_RETENTION_DAYS = max(1, int(_env_float("LOG_RETENTION_DAYS", 30, minimum=1)))
 ACCESS_LOG_RETENTION_DAYS = max(1, int(_env_float("ACCESS_LOG_RETENTION_DAYS", 7, minimum=1)))
 AUDIT_LOG_RETENTION_DAYS = max(1, int(_env_float("AUDIT_LOG_RETENTION_DAYS", 90, minimum=1)))
+# External health-check latency thresholds.  SSE total duration is deliberately
+# not used by the watchdog; it measures the client-held stream lifetime.
+HEALTH_SLOW_REQUEST_MS = _env_float("HEALTH_SLOW_REQUEST_MS", 60_000.0, minimum=0.0)
+HEALTH_SLOW_LLM_MS = _env_float("HEALTH_SLOW_LLM_MS", 30_000.0, minimum=0.0)
+HEALTH_SLOW_MIN_COUNT = max(1, int(_env_float("HEALTH_SLOW_MIN_COUNT", 3, minimum=1)))
 
 if API_KEY:
     logger.info(

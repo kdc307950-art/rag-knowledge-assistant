@@ -6,11 +6,12 @@ import logging
 import re
 import threading
 import time
+from collections.abc import Mapping
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
-from ..config import API_KEY, BASE_URL, LLM_MODEL
+from ..config import API_KEY, BASE_URL, LLM_MODEL, LLM_STREAM_USAGE_MODE
 from ..core.exceptions import LLMException
 from .prompts import REWRITE_QUERY_TEMPLATE
 
@@ -57,16 +58,45 @@ def get_llm():
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=8),
 )
-def _call_llm(messages, stream=False):
+def _stream_usage_enabled() -> bool:
+    mode = LLM_STREAM_USAGE_MODE
+    if mode in {"on", "true", "1"}:
+        return True
+    if mode in {"off", "false", "0"}:
+        return False
+    return "dashscope.aliyuncs.com" in BASE_URL.lower()
+
+
+def _call_llm(messages, stream=False, *, include_usage: bool | None = None):
     started = time.perf_counter()
     mode = "stream" if stream else "request"
+    if include_usage is None:
+        include_usage = stream and _stream_usage_enabled()
     try:
-        response = get_llm().chat.completions.create(
-            model=LLM_MODEL,
-            messages=messages,
-            stream=stream,
-        )
-        _record_llm(mode, time.perf_counter() - started)
+        request = {
+            "model": LLM_MODEL,
+            "messages": messages,
+            "stream": stream,
+        }
+        if stream and include_usage:
+            request["stream_options"] = {"include_usage": True}
+        try:
+            response = get_llm().chat.completions.create(**request)
+        except Exception as exc:
+            # Some OpenAI-compatible gateways reject the optional usage
+            # parameter. At this point no stream iterator exists and no token
+            # could have been emitted, so one parameter-only fallback is safe.
+            if stream and include_usage and _is_stream_usage_option_error(exc):
+                logger.warning("流式 usage 参数不受支持，降级为无 usage 流式请求")
+                request.pop("stream_options", None)
+                response = get_llm().chat.completions.create(**request)
+            else:
+                raise
+        # Stream usage is recorded exactly once from its terminal chunk by
+        # ``generate_answer_stream``. Some SDKs expose the same usage on the
+        # stream object as well, which would otherwise double-count tokens.
+        response_usage = None if stream else _extract_usage(response)
+        _record_llm(mode, time.perf_counter() - started, response_usage)
         return response
     except Exception as exc:
         _record_llm(mode, time.perf_counter() - started)
@@ -75,7 +105,83 @@ def _call_llm(messages, stream=False):
         raise
 
 
-def _record_llm(mode: str, duration: float) -> None:
+def _is_stream_usage_option_error(exc: BaseException) -> bool:
+    """Return True only for a provider rejection of ``stream_options``."""
+    status_code = getattr(exc, "status_code", None)
+    if status_code != 400 and not isinstance(exc, TypeError):
+        return False
+    parts = [str(exc)]
+    body = getattr(exc, "body", None)
+    if body is not None:
+        parts.append(str(body))
+    message = " ".join(parts).lower()
+    if "stream_options" in message or "include_usage" in message:
+        return True
+    return isinstance(exc, TypeError) and (
+        "unexpected keyword" in message or "keyword argument" in message
+    )
+
+
+def _extract_usage(value) -> dict[str, int | float] | None:
+    """Extract provider-reported prompt/completion counts without guessing totals."""
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        usage = value.get("usage")
+    else:
+        usage = getattr(value, "usage", None)
+    if usage is None:
+        return None
+
+    def read(*names):
+        for name in names:
+            candidate = usage.get(name) if isinstance(usage, Mapping) else getattr(usage, name, None)
+            if candidate is None:
+                continue
+            try:
+                number = float(candidate)
+            except (TypeError, ValueError):
+                continue
+            if number >= 0 and number == number and number != float("inf"):
+                return int(number) if number.is_integer() else number
+        return None
+
+    result = {}
+    input_tokens = read("prompt_tokens", "input_tokens")
+    output_tokens = read("completion_tokens", "output_tokens")
+    if input_tokens is not None:
+        result["input"] = input_tokens
+    if output_tokens is not None:
+        result["output"] = output_tokens
+    return result or None
+
+
+def _field(value, name: str, default=None):
+    if isinstance(value, Mapping):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
+def _record_llm_tokens(mode: str, usage: Mapping[str, int | float] | None) -> None:
+    if not usage:
+        return
+    try:
+        from backend.observability.metrics import mark_llm_tokens
+    except Exception:
+        logger.debug("记录 LLM token 指标失败", exc_info=True)
+        return
+    for token_type, amount in usage.items():
+        try:
+            mark_llm_tokens(token_type, amount, mode)
+        except Exception:
+            logger.debug("记录 LLM token 指标失败", exc_info=True)
+
+
+def _record_llm(
+    mode: str,
+    duration: float,
+    usage: Mapping[str, int | float] | None = None,
+) -> None:
     """Keep the core package usable without importing the FastAPI app eagerly."""
     try:
         from backend.observability.metrics import mark_llm_call
@@ -83,6 +189,8 @@ def _record_llm(mode: str, duration: float) -> None:
         mark_llm_call(mode, duration)
     except Exception:
         logger.debug("记录 LLM 指标失败", exc_info=True)
+    if usage:
+        _record_llm_tokens(mode, usage)
 
 
 def needs_history_rewrite(history: str, question: str) -> bool:
@@ -131,19 +239,50 @@ def generate_answer_stream(system_prompt: str, chat_history: list):
     # 服务层只消费文本增量；跳过工具调用或空 delta，保持统一的流式契约。
     messages = [{"role": "system", "content": system_prompt}] + chat_history
     response = None
-    try:
-        response = _call_llm(messages, stream=True)
-        for chunk in response:
-            choices = getattr(chunk, "choices", None) or []
+    stream_started = False
+    usage = None
+
+    def consume(current_response):
+        nonlocal stream_started, usage
+        for chunk in current_response:
+            # A chunk, even one without visible text, means the provider has
+            # started the stream; retrying with different parameters then risks
+            # duplicate generation.
+            stream_started = True
+            chunk_usage = _extract_usage(chunk)
+            if chunk_usage:
+                usage = chunk_usage
+            choices = _field(chunk, "choices", None) or []
             if not choices:
                 continue
-            delta_content = getattr(choices[0].delta, "content", None)
+            choice = choices[0]
+            delta = _field(choice, "delta", None)
+            delta_content = _field(delta, "content", None)
             if delta_content:
                 yield delta_content
+
+    try:
+        response = _call_llm(messages, stream=True)
+        try:
+            yield from consume(response)
+        except Exception as exc:
+            # A lazy-compatible client may reject stream_options on iteration
+            # rather than at create(). Retry once only before any chunk arrived.
+            if stream_started or not _is_stream_usage_option_error(exc):
+                raise
+            close = getattr(response, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    logger.debug("关闭不兼容模型流失败", exc_info=True)
+            response = _call_llm(messages, stream=True, include_usage=False)
+            yield from consume(response)
     except Exception as exc:
         logger.error("答案生成失败: %s", exc, exc_info=True)
         raise LLMException(f"答案生成失败: {exc}") from exc
     finally:
+        _record_llm_tokens("stream", usage)
         close = getattr(response, "close", None)
         if callable(close):
             try:

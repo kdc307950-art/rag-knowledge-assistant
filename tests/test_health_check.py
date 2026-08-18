@@ -120,6 +120,132 @@ def test_access_error_rate_treats_threshold_equality_as_breach(tmp_path):
     assert result["status"] == "critical"
 
 
+def test_slow_request_check_excludes_interrupted_and_sse_connection_lifetime(tmp_path):
+    now = datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc)
+    records = [
+        # A long-lived completed SSE stream is not a slow request by itself.
+        {
+            "timestamp": now.isoformat(),
+            "route": "/api/chat",
+            "route_type": "sse",
+            "outcome": "ok",
+            "phases": {"total_ms": 120_000, "llm_ms": 5_000},
+        },
+        # User/network cancellation is explicitly excluded from the alert.
+        {
+            "timestamp": now.isoformat(),
+            "route": "/api/chat",
+            "route_type": "sse",
+            "outcome": "interrupted",
+            "phases": {"total_ms": 120_000, "llm_ms": 120_000},
+        },
+        # Metrics scraping must not feed the application latency signal.
+        {
+            "timestamp": now.isoformat(),
+            "route": "/metrics",
+            "route_type": "request",
+            "outcome": "ok",
+            "phases": {"total_ms": 120_000},
+        },
+    ]
+    (tmp_path / "access.log").write_text(
+        "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+    )
+
+    result = health_check.check_slow_requests(
+        tmp_path,
+        now=now,
+        request_threshold_ms=60_000,
+        llm_threshold_ms=30_000,
+        min_count=1,
+    )
+
+    assert result["status"] == "ok"
+    assert result["requests"] == 1
+    assert result["slow"] == 0
+    assert result["sse_requests"] == 1
+
+
+def test_slow_request_check_counts_normal_total_and_sse_llm_stage(tmp_path):
+    now = datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc)
+    records = [
+        {
+            "timestamp": now.isoformat(),
+            "route": "/api/kb/stats",
+            "route_type": "request",
+            "outcome": "ok",
+            "phases": {"total_ms": 60_001},
+        },
+        {
+            "timestamp": now.isoformat(),
+            "route": "/api/chat",
+            "route_type": "sse",
+            "outcome": "ok",
+            "phases": {"total_ms": 90_000, "llm_ms": 30_001},
+        },
+        {
+            "timestamp": now.isoformat(),
+            "route": "/api/health",
+            "route_type": "request",
+            "outcome": "ok",
+            "phases": {"total_ms": 5_000, "llm_ms": 40_000},
+        },
+    ]
+    (tmp_path / "access.log").write_text(
+        "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+    )
+
+    result = health_check.check_slow_requests(
+        tmp_path,
+        now=now,
+        request_threshold_ms=60_000,
+        llm_threshold_ms=30_000,
+        min_count=3,
+    )
+
+    assert result["status"] == "critical"
+    assert result["detail"] == "threshold_exceeded"
+    assert result["requests"] == 3
+    assert result["normal_requests"] == 2
+    assert result["sse_requests"] == 1
+    assert result["slow"] == 3
+    assert result["slow_requests"] == 1
+    assert result["slow_sse"] == 1
+    assert result["slow_llm"] == 2
+
+
+def test_slow_request_check_reads_legacy_duration_ms_and_window(tmp_path):
+    now = datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc)
+    records = [
+        {
+            "timestamp": now.isoformat(),
+            "route": "/api/health",
+            "duration_ms": "60001",
+            "outcome": "ok",
+        },
+        {
+            "timestamp": (now - timedelta(minutes=30)).isoformat(),
+            "route": "/api/health",
+            "duration_ms": 90_000,
+            "outcome": "ok",
+        },
+    ]
+    (tmp_path / "access.log").write_text(
+        "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+    )
+
+    result = health_check.check_slow_requests(
+        tmp_path,
+        now=now,
+        window_minutes=15,
+        request_threshold_ms=60_000,
+        min_count=1,
+    )
+    assert result["status"] == "critical"
+    assert result["requests"] == 1
+    assert result["slow_requests"] == 1
+
+
 def test_check_disk_uses_filesystem_free_bytes(tmp_path):
     result = health_check.check_disk(
         tmp_path,

@@ -6,6 +6,7 @@ import hashlib
 
 from enterprise_rag.storage import vector_store
 from enterprise_rag.utils.logger import log_audit_event
+from backend.observability.metrics import mark_kb_busy
 
 router = APIRouter()
 
@@ -18,6 +19,8 @@ async def list_documents():
 @router.delete("/kb/documents/{source:path}")
 async def delete_document(source: str):
     if not vector_store.delete_document(source):
+        if getattr(vector_store, "is_knowledge_base_busy", lambda: False)():
+            mark_kb_busy("mutating")
         raise HTTPException(status_code=404, detail="文档不存在或知识库正在更新")
     log_audit_event(
         "document_deleted",
@@ -29,6 +32,8 @@ async def delete_document(source: str):
 @router.delete("/kb/clear")
 async def clear_documents():
     if not vector_store.clear_all_documents():
+        if getattr(vector_store, "is_knowledge_base_busy", lambda: False)():
+            mark_kb_busy("mutating")
         raise HTTPException(status_code=409, detail="知识库正在更新，请稍后重试")
     log_audit_event("knowledge_base_cleared")
     return {"ok": True}
