@@ -9,7 +9,7 @@ import {
   uploadDocuments,
   type UploadMetadata,
 } from "../api/knowledge";
-import { ApiError } from "../api/client";
+import { ApiError, friendlyApiError } from "../api/client";
 import { getStats, type KbStats } from "../api/health";
 
 const TERMINAL_STATUSES: ReadonlySet<UploadTaskStatus> = new Set(["done", "partial", "error"]);
@@ -37,7 +37,7 @@ interface KnowledgeState {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "知识库操作失败，请稍后重试。";
+  return friendlyApiError(error, "知识库操作失败，请稍后重试。");
 }
 
 function notifyKnowledgeChanged() {

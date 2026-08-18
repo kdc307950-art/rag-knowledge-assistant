@@ -1,17 +1,26 @@
 import { ApiError } from "../api/client";
+import { loginUser } from "../api/auth";
 import { getHealth } from "../api/health";
 
 interface LoginActions {
   prepareLogin: (password: string) => void;
   completeLogin: () => void;
   logout: () => void;
+  loginUser?: (token: string, user: Awaited<ReturnType<typeof loginUser>>["user"]) => void;
 }
 
 export async function verifyLogin(
   password: string,
-  { prepareLogin, completeLogin, logout }: LoginActions,
+  { prepareLogin, completeLogin, logout, loginUser: saveUser }: LoginActions,
+  username = "",
 ): Promise<string> {
   try {
+    if (username.trim()) {
+      const result = await loginUser(username.trim(), password);
+      saveUser?.(result.token, result.user);
+      completeLogin();
+      return "";
+    }
     // client.ts reads the persisted credential when the health request is sent.
     prepareLogin(password);
     await getHealth();

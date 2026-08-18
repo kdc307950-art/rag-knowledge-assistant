@@ -1,4 +1,4 @@
-"""APP_PASSWORD 鉴权：配置口令后所有 API 需 X-API-Key 头。"""
+"""Deployment-mode-aware access control for business API routes."""
 from __future__ import annotations
 
 import hmac
@@ -12,9 +12,11 @@ from enterprise_rag.auth.users import TokenManager, UserStore
 from enterprise_rag.config import (
     APP_PASSWORD,
     AUTH_DB_PATH,
+    AUTH_COOKIE_NAME,
     AUTH_MODE,
     AUTH_SECRET,
     AUTH_TOKEN_TTL_SECONDS,
+    DEPLOYMENT_MODE,
 )
 from enterprise_rag.utils.logger import log_audit_event
 
@@ -40,7 +42,7 @@ def get_user_store() -> UserStore:
 def get_token_manager() -> TokenManager:
     global _TOKEN_MANAGER
     if _TOKEN_MANAGER is None:
-        secret = AUTH_SECRET or APP_PASSWORD
+        secret = AUTH_SECRET
         if not secret:
             raise RuntimeError("AUTH_SECRET 未配置，不能启用 users 鉴权")
         _TOKEN_MANAGER = TokenManager(
@@ -57,6 +59,8 @@ def _set_auth_state(
     token: str | None = None,
     claims: dict | None = None,
 ) -> None:
+    if DEPLOYMENT_MODE not in {"dev", "single_user", "multi_user"}:
+        raise HTTPException(status_code=503, detail="部署鉴权模式无效")
     request.state.current_user = user
     request.state.auth_token = token
     request.state.auth_claims = claims or {}
@@ -107,9 +111,32 @@ async def require_access(
     x_api_key: str | None = Header(default=None),
     authorization: str | None = Header(default=None),
 ) -> None:
-    if AUTH_MODE == "users":
-        if authorization and authorization.lower().startswith("bearer "):
-            token = authorization[7:].strip()
+    if DEPLOYMENT_MODE == "multi_user" and (
+        AUTH_MODE != "users" or not AUTH_SECRET.strip()
+    ):
+        raise HTTPException(status_code=503, detail="多用户鉴权配置未就绪")
+    if DEPLOYMENT_MODE == "single_user" and (
+        AUTH_MODE != "legacy" or not APP_PASSWORD.strip()
+    ):
+        raise HTTPException(status_code=503, detail="单用户鉴权配置未就绪")
+    if DEPLOYMENT_MODE == "dev":
+        _set_auth_state(
+            request,
+            user={
+                "id": "local",
+                "username": "local",
+                "roles": ["admin"],
+                "department": "general",
+            },
+        )
+        return
+
+    if DEPLOYMENT_MODE == "multi_user":
+        bearer = authorization[7:].strip() if authorization and authorization.lower().startswith("bearer ") else ""
+        cookie_token = request.cookies.get(AUTH_COOKIE_NAME, "").strip()
+        for token in (bearer, cookie_token):
+            if not token:
+                continue
             try:
                 manager = get_token_manager()
                 claims = manager.verify(token, store=get_user_store())
@@ -131,19 +158,7 @@ async def require_access(
                 },
             )
             return
-    elif not APP_PASSWORD:
-        _set_auth_state(
-            request,
-            user={
-                "id": "local",
-                "username": "local",
-                "roles": ["admin"],
-                "department": "general",
-            },
-        )
-        return
-
-    if AUTH_MODE != "users" and x_api_key and hmac.compare_digest(x_api_key, APP_PASSWORD):
+    if DEPLOYMENT_MODE == "single_user" and x_api_key and hmac.compare_digest(x_api_key, APP_PASSWORD):
         _set_auth_state(
             request,
             user={

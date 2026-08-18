@@ -20,7 +20,7 @@ def main() -> int:
     parser.add_argument("username")
     parser.add_argument("--display-name", default=None)
     parser.add_argument("--department", default="general")
-    parser.add_argument("--role", action="append", dest="roles", default=["viewer"])
+    parser.add_argument("--role", action="append", dest="roles", default=None)
     parser.add_argument("--db", type=Path, default=AUTH_DB_PATH)
     args = parser.parse_args()
     password = getpass.getpass("Password: ")
@@ -32,7 +32,7 @@ def main() -> int:
         password,
         display_name=args.display_name,
         department=args.department,
-        roles=args.roles,
+        roles=args.roles or ["viewer"],
     )
     print(f"created user={user['username']} id={user['id']} roles={','.join(user['roles'])}")
     return 0

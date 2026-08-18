@@ -179,6 +179,8 @@ def test_diagnostics_route_uses_api_authentication(monkeypatch):
         "kb": {"document_count": 0, "chunk_count": 0, "generation": 0},
         "errors": {"count": 0, "recent": [], "truncated": False},
     }
+    monkeypatch.setattr(auth, "DEPLOYMENT_MODE", "single_user")
+    monkeypatch.setattr(auth, "AUTH_MODE", "legacy")
     monkeypatch.setattr(auth, "APP_PASSWORD", "test-key")
     monkeypatch.setattr(diagnostics_api, "build_diagnostics", lambda: report)
     monkeypatch.setattr(main, "build_diagnostics", lambda: report)

@@ -6,10 +6,17 @@ from collections import defaultdict, deque
 import threading
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from enterprise_rag.config import APP_PASSWORD, AUTH_MODE, AUTH_SECRET
+from enterprise_rag.config import (
+    AUTH_COOKIE_NAME,
+    AUTH_COOKIE_SECURE,
+    AUTH_MODE,
+    AUTH_SECRET,
+    AUTH_TOKEN_TTL_SECONDS,
+    DEPLOYMENT_MODE,
+)
 from enterprise_rag.utils.logger import log_audit_event
 
 from ..auth import get_token_manager, get_user_store, require_access
@@ -27,9 +34,9 @@ class LoginRequest(BaseModel):
 
 
 def _ensure_users_mode() -> None:
-    if AUTH_MODE != "users":
+    if DEPLOYMENT_MODE != "multi_user" or AUTH_MODE != "users":
         raise HTTPException(status_code=404, detail="用户登录未启用")
-    if not (AUTH_SECRET or APP_PASSWORD):
+    if not AUTH_SECRET.strip():
         raise HTTPException(status_code=503, detail="用户鉴权未配置 AUTH_SECRET")
 
 
@@ -63,7 +70,7 @@ def _record_login_failure(request: Request, username: str, *, now: float | None 
 
 
 @router.post("/auth/login")
-async def login(request: Request, payload: LoginRequest):
+async def login(request: Request, response: Response, payload: LoginRequest):
     _ensure_users_mode()
     if _login_rate_limited(request, payload.username):
         raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后重试")
@@ -73,6 +80,15 @@ async def login(request: Request, payload: LoginRequest):
         log_audit_event("auth_login_failure", username=payload.username[:64])
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     token = get_token_manager().issue(user)
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        token,
+        max_age=AUTH_TOKEN_TTL_SECONDS,
+        httponly=True,
+        secure=AUTH_COOKIE_SECURE,
+        samesite="lax",
+        path="/",
+    )
     log_audit_event("auth_login_success", user_id=user["id"], username=user["username"])
     return {"token": token, "expires_in": get_token_manager().ttl_seconds, "user": user}
 
@@ -84,11 +100,12 @@ async def me(request: Request, _=Depends(require_access)):
 
 
 @router.post("/auth/logout")
-async def logout(request: Request, _=Depends(require_access)):
+async def logout(request: Request, response: Response, _=Depends(require_access)):
     _ensure_users_mode()
     claims = getattr(request.state, "auth_claims", {}) or {}
     if claims.get("jti"):
         get_user_store().revoke_token(str(claims["jti"]), float(claims.get("exp", 0)))
     current_user = getattr(request.state, "current_user", {}) or {}
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
     log_audit_event("auth_logout", user_id=current_user.get("id"))
     return {"ok": True}

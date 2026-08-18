@@ -69,6 +69,7 @@ app.add_middleware(
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,
     expose_headers=["X-Session-Id", "X-Request-Id"],
 )
 app.add_middleware(ObservabilityMiddleware)

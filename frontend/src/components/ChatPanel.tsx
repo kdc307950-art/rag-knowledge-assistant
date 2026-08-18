@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { ApiError } from "../api/client";
+import { ApiError, friendlyApiError } from "../api/client";
 import { streamChat, streamDraft, streamGeneral, type StreamOptions } from "../api/sse";
 import { useChat } from "../store/chat";
 import type { ChatAction, ChatMessage } from "../types";
@@ -16,7 +16,7 @@ function isAbortError(error: unknown) {
 
 function unexpectedStreamError(error: unknown) {
   if (error instanceof ApiError) {
-    return { code: `http_${error.status}`, message: error.message, partial: false };
+    return { code: `http_${error.status}`, message: friendlyApiError(error, "请求失败"), partial: false };
   }
   if (error instanceof Error) {
     return { code: "stream_error", message: error.message, partial: false };

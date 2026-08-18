@@ -56,6 +56,8 @@ def test_auth_failure_is_audited_and_counted(monkeypatch):
     from backend.observability import metrics as observability_metrics
 
     events: list[dict] = []
+    monkeypatch.setattr(auth, "DEPLOYMENT_MODE", "single_user")
+    monkeypatch.setattr(auth, "AUTH_MODE", "legacy")
     monkeypatch.setattr(auth, "APP_PASSWORD", "secret")
     monkeypatch.setattr(auth, "log_audit_event", lambda event, **payload: events.append({"event": event, **payload}))
     observability_metrics.reset_metrics()

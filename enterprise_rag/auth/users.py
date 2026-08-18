@@ -174,6 +174,53 @@ class UserStore:
             ).fetchone()
         return row is not None
 
+    def readiness(self) -> dict[str, Any]:
+        """Perform a bounded local database health check without exposing users."""
+        result: dict[str, Any] = {
+            "readable": False,
+            "writable": False,
+            "quick_check": "error",
+            "roles_valid": True,
+            "active_admin_count": 0,
+            "database": "error",
+        }
+        try:
+            with self._connect() as connection:
+                check = connection.execute("PRAGMA quick_check").fetchone()
+                result["quick_check"] = str(check[0]).lower() if check else "error"
+                result["readable"] = result["quick_check"] == "ok"
+                rows = connection.execute(
+                    "SELECT roles_json FROM users WHERE active=1"
+                ).fetchall()
+                admin_count = 0
+                for (roles_json,) in rows:
+                    try:
+                        roles = json.loads(str(roles_json))
+                    except json.JSONDecodeError:
+                        result["roles_valid"] = False
+                        continue
+                    if not isinstance(roles, list) or not all(
+                        isinstance(role, str) and role in {"admin", "editor", "viewer"}
+                        for role in roles
+                    ):
+                        result["roles_valid"] = False
+                        continue
+                    if "admin" in roles:
+                        admin_count += 1
+                result["active_admin_count"] = admin_count
+
+                # DDL and DML are rolled back, so this proves write access
+                # without retaining a readiness marker in the user database.
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute("CREATE TEMP TABLE readiness_probe(value INTEGER)")
+                connection.execute("INSERT INTO readiness_probe(value) VALUES(1)")
+                connection.rollback()
+                result["writable"] = True
+                result["database"] = "ok"
+        except (OSError, sqlite3.Error, ValueError):
+            return result
+        return result
+
 
 class TokenManager:
     def __init__(self, *, secret: str, ttl_seconds: int):

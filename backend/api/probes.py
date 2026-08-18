@@ -10,6 +10,7 @@ from enterprise_rag.storage import vector_store
 from enterprise_rag.storage.kb_manifest import get_manifest
 from enterprise_rag.storage.embedding import get_model_readiness
 from enterprise_rag.rag.reranker import get_reranker_readiness
+from enterprise_rag.config import auth_readiness
 
 from ..observability.metrics import set_kb_snapshot
 
@@ -17,10 +18,17 @@ router = APIRouter()
 
 
 def _readiness() -> dict[str, object]:
+    auth = auth_readiness()
+    if not auth["configured"]:
+        return {
+            "ready": False,
+            "status": auth["code"],
+            "auth": auth,
+        }
     healthy, status = vector_store.get_vector_store_health()
     if not healthy:
         set_kb_snapshot(generation=None, documents=0, chunks=0, healthy=False)
-        return {"ready": False, "status": status}
+        return {"ready": False, "status": status, "auth": auth}
     try:
         embedding_ready, embedding_detail = get_model_readiness()
         reranker_ready, reranker_detail = get_reranker_readiness()
@@ -30,6 +38,7 @@ def _readiness() -> dict[str, object]:
                 "status": "model_unavailable",
                 "embedding": {"ready": embedding_ready, "detail": embedding_detail},
                 "reranker": {"ready": reranker_ready, "detail": reranker_detail},
+                "auth": auth,
             }
         snapshot = get_manifest().snapshot()
         document_count = vector_store.get_document_count()
@@ -41,7 +50,7 @@ def _readiness() -> dict[str, object]:
             healthy=True,
         )
         if status == "更新中":
-            return {"ready": True, "status": "updating"}
+            return {"ready": True, "status": "updating", "auth": auth}
         # A brand-new empty store is valid. Once initialized, counts must agree;
         # an update window is deliberately reported as ready/degraded.
         consistent = (
@@ -52,16 +61,17 @@ def _readiness() -> dict[str, object]:
             and sum(snapshot.chunk_counts.values()) == chunk_count
         )
         if not consistent:
-            return {"ready": False, "status": "manifest_mismatch"}
+            return {"ready": False, "status": "manifest_mismatch", "auth": auth}
         return {
             "ready": True,
             "status": "updating" if status == "更新中" else "ready",
             "embedding": {"ready": True, "detail": embedding_detail},
             "reranker": {"ready": True, "detail": reranker_detail},
+            "auth": auth,
         }
     except Exception:
         set_kb_snapshot(generation=None, documents=0, chunks=0, healthy=False)
-        return {"ready": False, "status": "dependency_error"}
+        return {"ready": False, "status": "dependency_error", "auth": auth}
 
 
 @router.get("/live")

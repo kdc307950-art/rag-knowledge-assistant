@@ -189,9 +189,26 @@ uv run python scripts/sync_document_governance.py --apply
 
 版本比较仅可通过受控离线运维/评估流程执行；普通聊天接口不会提供绕过治理过滤的参数。
 
-### 本地用户鉴权（阶段 A）
+### 部署与本地用户鉴权
 
-身份基础设施已预留但默认不改变现有行为。设置 `AUTH_MODE=users` 和 `AUTH_SECRET` 后，使用 `scripts/create_user.py` 创建用户；服务提供 `/api/auth/login`、`/api/auth/me`、`/api/auth/logout`，业务 API 接受 Bearer token，同时保留配置的 `APP_PASSWORD` 作为脚本/监控服务账户兼容通道。当前阶段尚未把用户部门映射到文档 ACL，检索仍按现有治理策略执行。
+`DEPLOYMENT_MODE` 是部署语义的唯一入口，`AUTH_MODE` 只保留为兼容鉴权机制。非法组合会使 `/api/ready` 返回 `503`，不会静默回退到较弱的鉴权方式。
+
+| `DEPLOYMENT_MODE` | 鉴权方式 | 必需配置 | 适用场景 |
+| --- | --- | --- | --- |
+| `dev` | 本地 admin 上下文 | `AUTH_MODE=legacy` | 仅本地开发，不可对外暴露 |
+| `single_user` | `X-API-Key` | `AUTH_MODE=legacy`、`APP_PASSWORD` | 单人受控使用 |
+| `multi_user` | Bearer Token + 文档 ACL | `AUTH_MODE=users`、`AUTH_SECRET`、至少一个 active admin | 多用户单机部署 |
+
+`multi_user` 中，`APP_PASSWORD` 是可选的高权限服务账户兼容通道，只供自动化脚本或受控监控使用；普通用户通过用户名密码登录，浏览器使用 HttpOnly Cookie，会话也兼容 Bearer Token。它不会再作为 token 签名密钥。
+
+```powershell
+$env:DEPLOYMENT_MODE="multi_user"
+$env:AUTH_MODE="users"
+$env:AUTH_SECRET="replace-with-a-long-random-secret"
+uv run python scripts/create_user.py admin --department general --role admin
+```
+
+服务提供 `/api/auth/login`、`/api/auth/me`、`/api/auth/logout`。ACL 已在上传、文档列表、统计、问答和起草入口生效；`private` 文档所有者由服务端根据上传用户写入。
 
 ```powershell
 uv run python scripts/create_user.py alice --department hr --role viewer
@@ -234,10 +251,13 @@ data/                     所有运行数据的默认根目录
 | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | 重排模型 |
 | `HF_HUB_OFFLINE` | `0` | `1` 时禁止在线下载 Hugging Face 模型 |
 | `APP_PASSWORD` | 空 | 可选的本地应用访问口令 |
-| `AUTH_MODE` | `legacy` | 用户鉴权模式；`legacy` 保持 X-API-Key，`users` 启用本地 SQLite 用户和 Bearer token |
-| `AUTH_SECRET` | 空 | `users` 模式的 HMAC token 密钥；未设置且无 `APP_PASSWORD` 时拒绝登录 |
+| `DEPLOYMENT_MODE` | `dev` | `dev`、`single_user`、`multi_user`；非法组合使 ready 探针失败 |
+| `AUTH_MODE` | `legacy` | 兼容鉴权机制；`single_user`/`dev` 必须为 `legacy`，`multi_user` 必须为 `users` |
+| `AUTH_SECRET` | 空 | `multi_user` 模式的 HMAC token 密钥，必须单独配置，不会回退到 `APP_PASSWORD` |
 | `AUTH_DB_PATH` | `./data/auth.sqlite3` | 本地用户与 token 吊销记录数据库 |
 | `AUTH_TOKEN_TTL_SECONDS` | `28800` | Bearer token 有效期，最短 300 秒 |
+| `AUTH_COOKIE_NAME` | `rag_access` | 浏览器会话 Cookie 名称 |
+| `AUTH_COOKIE_SECURE` | `0` | HTTPS 生产环境必须设为 `1` |
 | `METRICS_TOKEN` | 空 | `/metrics` 的独立访问令牌；未设置时仅允许 loopback |
 | `ALERT_WEBHOOK_URL` | 空 | 外部健康检查的尽力而为 webhook，不写入日志 |
 | `RAG_DATA_DIR` | `<项目根>/data` | 统一迁移缓存、Chroma 与 manifest 的运行数据根目录 |
@@ -349,7 +369,7 @@ FastAPI 启动后会在后台执行一次不阻塞服务启动的轻量自检。
 ### 可观测性与外部检查
 
 - `GET /api/live`：不鉴权的进程存活探针。
-- `GET /api/ready`：不鉴权的依赖就绪探针；离线模式下模型不可用、依赖异常或 manifest 不一致返回 `503`，在线模式允许首次使用时下载模型，空知识库仍是合法就绪状态。
+- `GET /api/ready`：不鉴权的依赖就绪探针；除模型、向量库和 manifest 外，还检查部署鉴权模式。`multi_user` 缺 `AUTH_SECRET`、用户库不可读写或没有 active admin 时返回 `503`；`dev` 返回 `200` 且带 `auth.warning=authentication_disabled`。
 - `GET /metrics`：Prometheus 文本格式；使用独立 `METRICS_TOKEN` 或仅允许 loopback。指标包括 HTTP/SSE 终态、首 token 延迟、LLM 调用与供应商返回的 input/output token（缺失时不猜测）、价格表驱动的估算成本、L1/L2 缓存、上传终态、鉴权失败、检索 hit/empty/error/busy、最终片段数、rerank top score、严格拒答和知识库快照。成本是估算值，不是供应商账单。
 - `rag_llm_calls_total` 按 SDK 实际调用 attempt 计数；临时网络/限流重试会产生多个 attempt，不等同于用户逻辑请求数。
 - 每个响应带服务端生成的 `X-Request-Id`。SSE 的 HTTP 状态通常为 `200`，业务错误必须看 `error`/`interrupted` 终态；当前无法可靠区分用户主动停止和网络断开。
@@ -371,12 +391,12 @@ uv run python scripts/health_check.py
 - `scripts/eval_retrieval.py` 是显式的 LLM-free golden-set 回归命令，输出 Recall@1/3/5、MRR、拒答准确率、评估错误率和配置快照。没有人工审核的 `eval/retrieval_cases.jsonl` 时，命令会失败而不是生成空基线。
 - `scripts/eval_groundedness.py` 只校验回答中的 `[S<n>]` 是否存在于本次来源快照，并汇总人工 claim verdict；它不执行 NLI、不删除已流出的句子，也不把引用存在性当作事实证明。
 - 上传或恢复真实原始文档后，先人工审核案例和回答，再把结果写入 `eval/results/`（该目录默认不入 Git）。
-- 业务分类、visibility 和后续 ACL 的边界见 [`docs/metadata-acl-contract.md`](docs/metadata-acl-contract.md)；当前单口令系统不提供多用户授权。
+- 业务分类、visibility 和 ACL 边界见 [`docs/metadata-acl-contract.md`](docs/metadata-acl-contract.md)。
 
 ### 部署边界
 
-- 若改为局域网或公网地址，至少应配置 `APP_PASSWORD`，并在反向代理层启用 HTTPS。
-- 当前系统是单一共享知识库，没有用户、角色、租户隔离或文档级访问控制，不应直接作为生产多用户系统部署。
+- 若改为局域网或公网地址，必须使用 `single_user` 或 `multi_user`，并在反向代理层启用 HTTPS；`dev` 不可对外暴露。
+- 当前系统支持本地用户、角色和基于文档元数据的 ACL，但仍是单机、单进程、非租户隔离系统，不应视为多实例 SaaS 平台。
 - 上传闸门、Chroma 写锁、任务快照和 BM25 状态都是单进程内对象。必须保持单个应用进程、单个写实例；多个进程共享同一 `RAG_DATA_DIR` 不受这些锁保护。
 - HTTP 会话历史由 `X-Session-Id` 绑定的进程内存储管理；模型和向量库资源是进程级共享资源。高并发场景应另行拆分 API 服务、队列和权限层。
 

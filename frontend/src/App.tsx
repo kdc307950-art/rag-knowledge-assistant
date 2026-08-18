@@ -8,6 +8,11 @@ import { useAuth } from "./store/auth";
 export default function App() {
   const isAuthenticated = useAuth((s) => s.isAuthenticated);
   const logout = useAuth((s) => s.logout);
+  const restoreSession = useAuth((s) => s.restoreSession);
+
+  useEffect(() => {
+    void restoreSession();
+  }, [restoreSession]);
 
   useEffect(() => {
     const onLogout = () => logout();

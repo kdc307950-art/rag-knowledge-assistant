@@ -98,6 +98,7 @@ APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 AUTH_MODE = os.getenv("AUTH_MODE", "legacy").strip().lower()
 if AUTH_MODE not in {"legacy", "users"}:
     AUTH_MODE = "legacy"
+DEPLOYMENT_MODE = os.getenv("DEPLOYMENT_MODE", "dev").strip().lower()
 AUTH_DB_PATH = Path(
     os.getenv("AUTH_DB_PATH", str(RUNTIME_DATA_DIR / "auth.sqlite3"))
 ).expanduser()
@@ -105,6 +106,92 @@ AUTH_SECRET = os.getenv("AUTH_SECRET", "")
 AUTH_TOKEN_TTL_SECONDS = max(
     300, int(_env_float("AUTH_TOKEN_TTL_SECONDS", 8 * 3600, minimum=300))
 )
+AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "rag_access")
+AUTH_COOKIE_SECURE = os.getenv("AUTH_COOKIE_SECURE", "0").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+
+
+def auth_readiness() -> dict:
+    """Validate deployment/authentication mode without exposing secrets."""
+    mode = DEPLOYMENT_MODE
+    result = {
+        "mode": mode,
+        "configured": False,
+        "code": "unknown",
+        "detail": "",
+        "database": "not_checked",
+        "admin_count": 0,
+    }
+    if mode not in {"dev", "single_user", "multi_user"}:
+        result.update(code="invalid_deployment_mode", detail="DEPLOYMENT_MODE 无效")
+        return result
+    if mode == "dev":
+        if AUTH_MODE != "legacy":
+            result.update(
+                code="invalid_mode_combination",
+                detail="dev 模式要求 AUTH_MODE=legacy",
+            )
+            return result
+        result.update(
+            configured=True,
+            code="ok",
+            detail="开发模式未启用用户鉴权",
+            warning="authentication_disabled",
+        )
+        return result
+    if mode == "single_user":
+        if AUTH_MODE != "legacy":
+            result.update(
+                code="invalid_mode_combination",
+                detail="single_user 模式要求 AUTH_MODE=legacy",
+            )
+            return result
+        if not APP_PASSWORD.strip():
+            result.update(code="auth_unconfigured", detail="single_user 模式缺少 APP_PASSWORD")
+            return result
+        result.update(
+            configured=True,
+            code="ok",
+            detail="单用户口令鉴权已配置",
+            warning=("weak_app_password" if len(APP_PASSWORD) < 12 else None),
+        )
+        return result
+
+    if AUTH_MODE != "users":
+        result.update(
+            code="invalid_mode_combination",
+            detail="multi_user 模式要求 AUTH_MODE=users",
+        )
+        return result
+    if not AUTH_SECRET.strip():
+        result.update(code="auth_unconfigured", detail="multi_user 模式缺少 AUTH_SECRET")
+        return result
+    try:
+        from .auth.users import UserStore
+
+        health = UserStore(AUTH_DB_PATH).readiness()
+    except Exception as exc:
+        result.update(code="auth_database_error", detail=str(exc)[:200])
+        return result
+    result.update(
+        database=health.get("database", "error"),
+        admin_count=health.get("active_admin_count", 0),
+    )
+    if not health.get("readable") or not health.get("writable"):
+        result.update(code="auth_database_error", detail="用户数据库不可读写")
+        return result
+    if health.get("quick_check") != "ok":
+        result.update(code="auth_database_corrupt", detail="用户数据库 quick_check 未通过")
+        return result
+    if not health.get("roles_valid", False):
+        result.update(code="auth_database_error", detail="用户角色数据无效")
+        return result
+    if int(health.get("active_admin_count", 0)) < 1:
+        result.update(code="auth_admin_missing", detail="用户库没有 active admin")
+        return result
+    result.update(configured=True, code="ok", detail="多用户 Bearer Token 与 ACL 已配置")
+    return result
 METRICS_TOKEN = os.getenv("METRICS_TOKEN", "")
 ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL", "")
 BACKUP_DIR = Path(os.getenv("RAG_BACKUP_DIR", str(PROJECT_ROOT / "backups"))).expanduser()

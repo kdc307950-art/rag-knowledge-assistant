@@ -1,8 +1,17 @@
-// fetch 封装：统一带认证与会话头，401 触发登出事件。
+// fetch 封装：统一带 Cookie/Bearer、会话头，401 触发登出事件。
 const API_BASE = "/api";
 export const API_KEY_STORAGE_KEY = "apiKey";
 export const LOCAL_AUTH_STORAGE_KEY = "localAuth";
 export const SESSION_ID_STORAGE_KEY = "sessionId";
+let accessToken = "";
+
+export function setAccessToken(token: string) {
+  accessToken = token.trim();
+}
+
+export function clearAccessToken() {
+  accessToken = "";
+}
 
 export class ApiError extends Error {
   status: number;
@@ -14,7 +23,18 @@ export class ApiError extends Error {
   }
 }
 
+export function friendlyApiError(error: unknown, fallback: string) {
+  if (!(error instanceof ApiError)) {
+    return error instanceof Error ? error.message : fallback;
+  }
+  if (error.status === 401) return "登录已失效，请重新登录。";
+  if (error.status === 403) return "当前账号没有执行此操作的权限。";
+  if (error.status === 503) return "服务尚未就绪，请检查部署鉴权和依赖状态。";
+  return error.message || fallback;
+}
+
 function unauthorized(): never {
+  clearAccessToken();
   localStorage.removeItem(API_KEY_STORAGE_KEY);
   localStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
   clearSessionId();
@@ -43,7 +63,9 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   if (hasBody && !isFormData && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  if (apiKey && !headers.has("X-API-Key")) {
+  if (accessToken && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${accessToken}`);
+  } else if (apiKey && !headers.has("X-API-Key")) {
     headers.set("X-API-Key", apiKey);
   }
   if (sessionId && !headers.has("X-Session-Id")) {
@@ -52,6 +74,7 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
 
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
+    credentials: "include",
     headers,
   });
   if (res.status === 401) {

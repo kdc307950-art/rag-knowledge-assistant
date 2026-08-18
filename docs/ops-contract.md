@@ -1,6 +1,6 @@
 # 运维契约
 
-本文档是单机、单进程 React + FastAPI 部署的可观测性边界。它不是多用户生产承诺，也不把“指标存在”当成“系统一定可用”。
+本文档是单机、单进程 React + FastAPI 部署的可观测性边界。它支持本地用户和文档 ACL，但不是多租户或多实例生产承诺，也不把“指标存在”当成“系统一定可用”。
 
 ## SLO 与保留期
 
@@ -17,7 +17,7 @@
 ## 端点契约
 
 - `GET /api/live`：不鉴权，进程存活时返回 `200 {"ok": true}`。
-- `GET /api/ready`：不鉴权；离线模式下 embedding/reranker 不可用、向量库依赖失败或 manifest 与向量库不一致时返回 `503`。在线模式把“可从配置的 Hub 下载”视为可用，不主动下载模型。空知识库是合法状态，更新窗口返回 `200` 且状态为 `updating`。
+- `GET /api/ready`：不鉴权；除 embedding/reranker、向量库和 manifest 外，检查部署鉴权契约。`dev` 返回 `200` 和 `auth.warning=authentication_disabled`；`single_user` 缺 `APP_PASSWORD`，或 `multi_user` 缺 `AUTH_SECRET`、用户库不可读写、角色数据异常、没有 active admin 时返回 `503`。在线模式把“可从配置的 Hub 下载”视为可用，不主动下载模型。空知识库是合法状态，更新窗口返回 `200` 且状态为 `updating`。
 - `GET /metrics`：优先使用独立 `METRICS_TOKEN`。未配置 token 时只允许 loopback，不能把 `APP_PASSWORD` 的本地 fail-open 规则复制到公网。
 - 每个 HTTP 响应带服务端生成的 `X-Request-Id`。客户端传入的同名 header 不会被信任。
 
@@ -37,7 +37,9 @@ Chroma/HNSW 没有本项目可依赖的在线热快照契约。创建或恢复�
 
 ## 部署边界
 
-默认监听 `127.0.0.1`、单进程单 worker。局域网或公网暴露必须同时配置 `APP_PASSWORD` 和 HTTPS。本项目没有用户、角色、租户或文档级权限隔离；不要把单口令 API 当成多租户身份系统。
+默认监听 `127.0.0.1`、单进程单 worker。`DEPLOYMENT_MODE=dev` 仅允许本地开发；局域网或公网暴露必须使用 `single_user` 或 `multi_user` 并启用 HTTPS。`single_user` 使用 `APP_PASSWORD`；`multi_user` 使用 Bearer Token、本地 SQLite 用户和检索前 ACL，且必须有独立 `AUTH_SECRET` 与至少一个 active admin。`APP_PASSWORD` 在 multi-user 中仅作为可选高权限服务账户，不是普通用户凭据，也不能作为 token 密钥。本项目没有租户隔离或多实例写入支持。
+
+浏览器登录使用 HttpOnly `rag_access` Cookie，生产 HTTPS 必须设置 `AUTH_COOKIE_SECURE=1`；Bearer 只作为脚本、测试和受控客户端兼容协议。认证 Cookie、用户库和治理配置必须纳入备份与恢复演练。
 
 反向代理不得把 `/api/live`、`/api/ready` 直接暴露给公网；它们应仅供本机或受控监控网段访问。若代理 `/metrics`，必须配置 `METRICS_TOKEN`，因为反向代理的 loopback 来源会绕过“仅本机”判断。
 

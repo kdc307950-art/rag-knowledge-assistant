@@ -2,15 +2,51 @@
 
 统一走 OpenAI 兼容无关的自定义 REST + SSE 协议。启动：`uv run uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 1`（单 worker 红线：上传闸门/Chroma 写锁/BM25 为单进程对象）。
 
-## 鉴权
+## 部署与鉴权
 
-配置 `APP_PASSWORD` 后，所有请求必须携带请求头：
+`DEPLOYMENT_MODE` 决定对外鉴权语义：
+
+| 模式 | 必需配置 | 业务 API 鉴权 |
+| --- | --- | --- |
+| `dev` | `AUTH_MODE=legacy` | 本地开发 admin 上下文，不可公网暴露 |
+| `single_user` | `AUTH_MODE=legacy`、`APP_PASSWORD` | `X-API-Key` |
+| `multi_user` | `AUTH_MODE=users`、`AUTH_SECRET`、active admin | `Authorization: Bearer <token>` |
+
+`single_user` 请求头：
 
 ```
-X-API-Key: <password>
+X-API-Key: <APP_PASSWORD>
 ```
 
-未配置 `APP_PASSWORD` 时鉴权跳过（本地开发）。鉴权失败返回 401。
+`multi_user` 的普通用户请求头：
+
+```
+Authorization: Bearer <token>
+```
+
+浏览器登录成功后服务端同时设置 `rag_access` HttpOnly Cookie（`SameSite=Lax`）。
+React 前端使用 Cookie 自动恢复会话；Bearer 仅作为脚本、测试和受控客户端的兼容方式。
+生产 HTTPS 必须设置 `AUTH_COOKIE_SECURE=1`。
+
+在 multi-user 中，`APP_PASSWORD` 可选保留为自动化脚本的高权限服务账户；它不等于普通用户身份，也不会作为 token 签名密钥。非法模式组合或必需凭据缺失时，业务 API 返回 `503`，不会降级为免鉴权。
+
+| 状态码 | 含义 |
+| --- | --- |
+| `401` | 凭据缺失、错误、过期或已吊销 |
+| `403` | 身份已确认，但没有管理文档权限 |
+| `503` | 部署鉴权配置未就绪 |
+
+### 用户认证接口
+
+仅 `multi_user` 开启：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/auth/login` | `{"username","password"}` 换取 Bearer token |
+| GET | `/api/auth/me` | 返回当前 token 对应的用户 |
+| POST | `/api/auth/logout` | 吊销当前 token |
+
+`/api/ready` 不鉴权，以便本机或受控监控网段探测，但反向代理不得将它暴露到公网。
 
 ## 会话
 
@@ -60,6 +96,7 @@ X-API-Key: <password>
 ## 上传（POST /api/upload）
 
 - `multipart/form-data`，字段名 `files`（可多个）；
+- 可选字段：`classification`（`policy|process|benefit|technical|other`）、`department`（ASCII 部门代码）、`visibility`（`all|department|private`）；`owner_id` 由服务端从当前用户导出；
 - 响应：`{"success": true, "task_id": "upload_xxx", ...}`；
 - 服务端**流式**写入暂存（`_UploadFileAdapter` 直接读 UploadFile 临时文件），不整批复制进内存；
 - 大小/批次上限沿用 `document_service` 配置（单文件 20MB、批次 200MB）。
