@@ -1,0 +1,23 @@
+# Template only: replace every placeholder and manually review against the original documents.
+# Set review_status to approved only after source/chapter/parent_id/paragraph verification.
+# This file intentionally fails evaluation while any case remains unreviewed.
+{"schema_version": 2, "case_id": "retrieval_001", "query": "替换为知识库中的稳定事实问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": [], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_002", "query": "替换为知识库中的专有名词问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": ["proper_noun"], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_003", "query": "替换为需要多个文档共同回答的问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": ["multi_document"], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_004", "query": "替换为依赖上一轮语义的追问", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": ["history_followup"], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_005", "query": "替换为明确不在知识库中的问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": true, "tags": ["expected_refusal"], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_006", "query": "替换为知识库中的稳定事实问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": [], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_007", "query": "替换为知识库中的专有名词问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": ["proper_noun"], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_008", "query": "替换为需要多个文档共同回答的问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": ["multi_document"], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_009", "query": "替换为依赖上一轮语义的追问", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": ["history_followup"], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_010", "query": "替换为明确不在知识库中的问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": true, "tags": ["expected_refusal"], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_011", "query": "替换为知识库中的稳定事实问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": [], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_012", "query": "替换为知识库中的专有名词问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": ["proper_noun"], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_013", "query": "替换为需要多个文档共同回答的问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": ["multi_document"], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_014", "query": "替换为依赖上一轮语义的追问", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": ["history_followup"], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_015", "query": "替换为明确不在知识库中的问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": true, "tags": ["expected_refusal"], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_016", "query": "替换为知识库中的稳定事实问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": [], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_017", "query": "替换为知识库中的专有名词问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": ["proper_noun"], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_018", "query": "替换为需要多个文档共同回答的问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": ["multi_document"], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_019", "query": "替换为依赖上一轮语义的追问", "expected_sources": [], "expected_evidence": [], "expected_refusal": false, "tags": ["history_followup"], "review_status": "unreviewed"}
+{"schema_version": 2, "case_id": "retrieval_020", "query": "替换为明确不在知识库中的问题", "expected_sources": [], "expected_evidence": [], "expected_refusal": true, "tags": ["expected_refusal"], "review_status": "unreviewed"}

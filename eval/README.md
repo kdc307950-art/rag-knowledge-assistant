@@ -28,6 +28,19 @@ set must be manually reviewed against the real source files; synthetic or
 guessed labels are not a valid baseline. v1 remains readable for migration but
 does not produce evidence metrics.
 
+Generate a neutral authoring template after loading a new corpus:
+
+```powershell
+uv run python scripts/create_golden_set_template.py `
+  --output eval/retrieval_cases.jsonl `
+  --count 20
+```
+
+The template covers factual, proper-noun, multi-document, history-follow-up,
+and refusal cases, but it is deliberately marked `review_status=unreviewed`.
+The evaluator rejects it until every case has been checked against the source
+document and its metadata, then changed to `approved`.
+
 ## Run
 
 ```powershell

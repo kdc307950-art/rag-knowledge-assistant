@@ -67,6 +67,11 @@ def _load_cases(path: Path) -> tuple[list[dict[str, Any]], str]:
             raise ValueError(f"{path}:{line_number} 缺少 case_id")
         if not str(record.get("query") or "").strip():
             raise ValueError(f"{path}:{line_number} 缺少 query")
+        review_status = record.get("review_status")
+        if review_status is not None and review_status != "approved":
+            raise ValueError(
+                f"{path}:{line_number} review_status 必须为 approved；模板或未审核案例不能跑基线"
+            )
         tags = record.get("tags") or []
         if not isinstance(tags, list) or any(tag not in SUPPORTED_TAGS for tag in tags):
             raise ValueError(f"{path}:{line_number} tags 含未知值")
@@ -100,6 +105,8 @@ def _load_cases(path: Path) -> tuple[list[dict[str, Any]], str]:
         record["expected_refusal"] = expected_refusal
         record["expected_evidence"] = expected_evidence
         record["schema_version"] = schema_version
+        if review_status is not None:
+            record["review_status"] = review_status
         records.append(record)
     if not records:
         raise ValueError(f"{path} 没有可评估案例；golden set 需要人工标注后再运行")
