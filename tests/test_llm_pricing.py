@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 import json
 
 
@@ -173,3 +173,68 @@ def test_provider_detection_recognizes_deepseek_openai_endpoint():
     from enterprise_rag.llm.pricing import provider_from_base_url
 
     assert provider_from_base_url("https://api.deepseek.com") == "deepseek"
+
+
+def test_deepseek_tariff_uses_cache_split_and_beijing_peak_window(tmp_path):
+    from enterprise_rag.llm.pricing import estimate_cost
+
+    path = _write_prices(
+        tmp_path,
+        [{
+            "provider": "deepseek", "model": "deepseek-v4-flash",
+            "currency": "CNY", "effective_date": "2026-08-18",
+            "tariff": {
+                "timezone": "Asia/Shanghai",
+                "cache_hit_offpeak_per_million": 0.05,
+                "cache_hit_peak_per_million": 0.1,
+                "input_offpeak_per_million": 1.5,
+                "input_peak_per_million": 3.0,
+                "output_offpeak_per_million": 4.5,
+                "output_peak_per_million": 9.0,
+            },
+        }],
+    )
+    usage = {"input": 1_000_000, "cached_input": 200_000, "uncached_input": 800_000, "output": 1_000_000}
+
+    peak = estimate_cost(
+        usage, provider="deepseek", model="deepseek-v4-flash", table_path=path,
+        at=datetime.fromisoformat("2026-08-18T10:00:00+08:00"),
+    )
+    offpeak = estimate_cost(
+        usage, provider="deepseek", model="deepseek-v4-flash", table_path=path,
+        at=datetime.fromisoformat("2026-08-18T13:00:00+08:00"),
+    )
+
+    assert peak.amount == 11.42
+    assert offpeak.amount == 5.71
+    assert peak.confidence == "estimated"
+
+
+def test_deepseek_tariff_uses_cache_miss_price_when_cache_split_is_missing(tmp_path):
+    from enterprise_rag.llm.pricing import estimate_cost
+
+    path = _write_prices(
+        tmp_path,
+        [{
+            "provider": "deepseek", "model": "deepseek-v4-flash",
+            "currency": "CNY", "effective_date": "2026-08-18",
+            "tariff": {
+                "timezone": "Asia/Shanghai",
+                "cache_hit_offpeak_per_million": 0.05,
+                "cache_hit_peak_per_million": 0.1,
+                "input_offpeak_per_million": 1.5,
+                "input_peak_per_million": 3.0,
+                "output_offpeak_per_million": 4.5,
+                "output_peak_per_million": 9.0,
+            },
+        }],
+    )
+
+    result = estimate_cost(
+        {"input": 1_000_000, "output": 1_000_000},
+        provider="deepseek", model="deepseek-v4-flash", table_path=path,
+        at=datetime.fromisoformat("2026-08-18T13:00:00+08:00"),
+    )
+
+    assert result.amount == 6
+    assert result.confidence == "estimated"

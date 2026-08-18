@@ -163,6 +163,35 @@ def test_stream_usage_accepts_mapping_chunks(monkeypatch):
     assert usage_calls == [("stream", {"input": 4, "output": 2})]
 
 
+def test_deepseek_usage_extracts_cache_hit_and_miss_tokens():
+    from enterprise_rag.llm import client
+
+    usage = client._extract_usage({
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "prompt_cache_hit_tokens": 30,
+            "prompt_cache_miss_tokens": 70,
+        }
+    })
+
+    assert usage == {
+        "input": 100,
+        "output": 20,
+        "cached_input": 30,
+        "uncached_input": 70,
+    }
+
+
+def test_auto_mode_enables_terminal_usage_for_deepseek(monkeypatch):
+    from enterprise_rag.llm import client
+
+    monkeypatch.setattr(client, "BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setattr(client, "LLM_STREAM_USAGE_MODE", "auto")
+
+    assert client._stream_usage_enabled() is True
+
+
 def test_stream_object_usage_is_not_recorded_before_terminal_chunk(monkeypatch):
     from enterprise_rag.llm import client
 

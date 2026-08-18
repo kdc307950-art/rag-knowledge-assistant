@@ -59,7 +59,10 @@ def _stream_usage_enabled() -> bool:
         return True
     if mode in {"off", "false", "0"}:
         return False
-    return "dashscope.aliyuncs.com" in BASE_URL.lower()
+    return any(
+        host in BASE_URL.lower()
+        for host in ("dashscope.aliyuncs.com", "api.deepseek.com")
+    )
 
 
 @retry(
@@ -149,10 +152,16 @@ def _extract_usage(value) -> dict[str, int | float] | None:
     result = {}
     input_tokens = read("prompt_tokens", "input_tokens")
     output_tokens = read("completion_tokens", "output_tokens")
+    cached_input = read("prompt_cache_hit_tokens", "cached_tokens")
+    uncached_input = read("prompt_cache_miss_tokens")
     if input_tokens is not None:
         result["input"] = input_tokens
     if output_tokens is not None:
         result["output"] = output_tokens
+    if cached_input is not None:
+        result["cached_input"] = cached_input
+    if uncached_input is not None:
+        result["uncached_input"] = uncached_input
     return result or None
 
 

@@ -36,14 +36,14 @@ tokens:
 | DeepSeek-V4-Flash-0731 | 0.05 / 0.10 | 1.50 / 3.00 | 4.50 / 9.00 |
 | DeepSeek-V4-Pro-0813 | 0.15 / 0.30 | 4.50 / 9.00 | 13.50 / 27.00 |
 
-These values are recorded from a user-provided image, not independently
-verified against a provider source. They are therefore **not** added to the
-active price table. The current `.env` model is `qwen3.7-flash`, while the
-repository fallback configuration is `deepseek-v4-flash`; applying these
-numbers without confirming the active model would be a model-mapping error.
+These values are recorded from a user-provided image and are active for the
+matching DeepSeek-V4 model IDs in `config/llm_prices.json`, using August 18,
+2026 as the local activation date. The image itself does not state a provider
+price effective date, so update the entries when an official dated notice
+changes the tariff.
 
-The current estimator also cannot infer cache-hit tokens or Beijing peak
-windows from the existing usage payload. Before enabling a DeepSeek profile,
-extend the schema to record `cached_input_tokens`, request timezone, and the
-peak/off-peak tariff, then verify the provider's exact model IDs and effective
-date. Do not collapse the screenshot's peak price into a single average price.
+The estimator now reads DeepSeek's cache-hit/cache-miss usage fields when they
+are returned, uses `Asia/Shanghai` peak windows of 09:00-12:00 and 14:00-18:00,
+and otherwise prices unknown input cache state as cache-miss. Every tariff
+estimate remains labeled `estimated`, not provider billing reconciliation. Do
+not collapse the screenshot's peak price into a single average price.
