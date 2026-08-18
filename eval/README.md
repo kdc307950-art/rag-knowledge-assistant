@@ -41,6 +41,18 @@ future result cannot be compared silently across index generations.
 It also reports `evaluation_error_rate` and `busy_rate`; a high Recall/MRR with
 non-zero evaluation errors is not a valid clean baseline.
 
+To inspect real anchors before manual annotation:
+
+```powershell
+uv run python scripts/inspect_kb_metadata.py `
+  --source "三体全文.txt" `
+  --contains "红岸工程" `
+  --limit 10
+```
+
+The command prints metadata and a short excerpt only. It does not create or
+approve a case file.
+
 ## Groundedness Review
 
 `scripts/eval_groundedness.py` evaluates already-generated answers. Each JSONL

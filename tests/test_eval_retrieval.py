@@ -114,3 +114,16 @@ def test_v2_requires_evidence_and_scores_parent_anchor(monkeypatch, tmp_path):
 
     assert report["metrics"]["evidence_recall_at_1"] == 1.0
     assert report["metrics"]["evidence_mrr"] == 1.0
+
+
+def test_evidence_paragraph_anchor_matches_comma_separated_metadata():
+    from scripts.eval_retrieval import _evidence_matches
+
+    assert _evidence_matches(
+        {"source": "book.txt", "chapter": "第一章", "paragraph": 3},
+        {"source": "book.txt", "chapter": "第一章", "paragraph": "1,2,3,4"},
+    )
+    assert not _evidence_matches(
+        {"source": "book.txt", "chapter": "第一章", "paragraph": 9},
+        {"source": "book.txt", "chapter": "第一章", "paragraph": "1,2,3,4"},
+    )

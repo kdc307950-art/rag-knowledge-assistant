@@ -120,7 +120,15 @@ def _evidence_matches(expected: dict[str, Any], result: dict[str, Any]) -> bool:
         return False
     for field in ("parent_id", "chapter", "paragraph"):
         value = expected.get(field)
-        if value is not None and str(value).strip() and str(value) != str(result.get(field) or ""):
+        if value is None or not str(value).strip():
+            continue
+        actual = str(result.get(field) or "").strip()
+        if field == "paragraph":
+            expected_tokens = {token.strip() for token in str(value).split(",") if token.strip()}
+            actual_tokens = {token.strip() for token in actual.split(",") if token.strip()}
+            if not expected_tokens.intersection(actual_tokens):
+                return False
+        elif str(value).strip() != actual:
             return False
     return True
 
