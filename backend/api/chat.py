@@ -56,6 +56,7 @@ _ERROR_MESSAGES = {
     "model_not_found": "模型配置不可用，请检查模型名称后重试。",
     "empty_response": "模型未返回有效内容，请重新提问。",
     "retrieval_error": "知识库检索服务暂时不可用，请稍后重试。",
+    "document_governance_unresolved": "文档生效关系尚未确认，普通问答暂不可用。",
     "generation_error": "回答生成未正常完成，请稍后重试。",
 }
 

@@ -65,8 +65,9 @@ uv run python scripts/eval_retrieval.py `
   --output eval/results/retrieval-<date>.json
 ```
 
-The report records the case-file hash and retrieval/model configuration so a
-future result cannot be compared silently across index generations.
+The report records the case-file hash, retrieval/model configuration, and the
+`document_governance_sha256` policy snapshot so a future result cannot be
+compared silently across index generations or governance-state changes.
 It also reports `evaluation_error_rate` and `busy_rate`; a high Recall/MRR with
 non-zero evaluation errors is not a valid clean baseline.
 

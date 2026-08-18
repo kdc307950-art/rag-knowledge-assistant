@@ -16,6 +16,12 @@ class KnowledgeBaseBusyError(RetrievalException):
     """知识库正在执行上传或破坏性变更，当前不能获取稳定检索快照。"""
     pass
 
+
+class DocumentGovernanceError(RetrievalException):
+    """文档生效关系未确认，普通问答必须 fail closed。"""
+
+    code = "document_governance_unresolved"
+
 class DocumentException(RAGException):
     """文档处理异常"""
     def __init__(self, message: str, *, storage_may_have_changed: bool = False):

@@ -425,7 +425,7 @@ def llm_cost_snapshot() -> dict:
 def mark_retrieval(outcome: str, results_count: int = 0, top_score: float | None = None) -> None:
     """Record one retrieval decision using bounded, semantic outcomes."""
     normalized = str(outcome or "unknown").strip().lower()
-    if normalized not in {"hit", "empty", "error", "busy"}:
+    if normalized not in {"hit", "empty", "error", "busy", "governance_unresolved"}:
         normalized = "error"
     try:
         count = max(0, int(results_count))

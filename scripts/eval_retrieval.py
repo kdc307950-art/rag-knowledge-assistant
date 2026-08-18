@@ -31,9 +31,11 @@ from enterprise_rag.config import (  # noqa: E402
     RETRIEVAL_VERSION,
     HYBRID_ALPHA,
     FINAL_TOP_K,
+    DOCUMENT_GOVERNANCE_PATH,
 )
 from enterprise_rag.core.exceptions import KnowledgeBaseBusyError  # noqa: E402
 from enterprise_rag.rag.retriever import retrieve_context  # noqa: E402
+from enterprise_rag.storage.document_governance import retrieval_policy  # noqa: E402
 
 
 SCHEMA_VERSION = 2
@@ -255,6 +257,15 @@ def _source_policy_sources(
     return set(expected_sources)
 
 
+def _retrieval_policy_for_case(case: dict[str, Any]) -> str:
+    """Keep evaluation explicit when production ordinary retrieval is fail-closed."""
+    if bool(case.get("expected_refusal")):
+        return "all_active"
+    if case.get("source_policy") == "authoritative_only":
+        return "authoritative"
+    return "all_active"
+
+
 def _evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
     # Deliberately call retrieve_context instead of RagService.retrieve_only:
     # the latter may invoke LLM query rewriting for history-dependent prompts.
@@ -262,6 +273,7 @@ def _evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
         _context, _sources, raw_results = retrieve_context(
             str(case["query"]),
             return_raw=True,
+            retrieval_policy=_retrieval_policy_for_case(case),
         )
     except KnowledgeBaseBusyError:
         return {
@@ -435,10 +447,19 @@ def evaluate(cases_path: Path) -> dict[str, Any]:
             "hybrid_alpha": HYBRID_ALPHA,
             "final_top_k": FINAL_TOP_K,
             "embedding_batch_size": EMBEDDING_BATCH_SIZE,
+            "document_governance_policy": retrieval_policy(),
+            "document_governance_sha256": _file_sha256(DOCUMENT_GOVERNANCE_PATH),
         },
         "metrics": metrics,
         "cases": results,
     }
+
+
+def _file_sha256(path: Path) -> str | None:
+    """Record the exact governance policy used by an offline baseline."""
+    if not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def main() -> int:

@@ -10,7 +10,7 @@ from ..rag.retriever import retrieve_context
 
 from ..config import DRAFT_ENABLED, FALLBACK_ENABLED
 from ..core.constants import MAX_GENERATION_QUERY_LENGTH
-from ..core.exceptions import KnowledgeBaseBusyError
+from ..core.exceptions import DocumentGovernanceError, KnowledgeBaseBusyError
 from ..llm.client import generate_answer_stream, needs_history_rewrite, rewrite_query
 from ..llm.groundedness import validate_citations
 from ..llm.prompts import DRAFT_SYSTEM_PROMPT, SYSTEM_PROMPT_TEMPLATE
@@ -192,6 +192,18 @@ class RagService:
                 history_summary=history_summary,
                 error=str(exc),
                 busy=True,
+            )
+        except DocumentGovernanceError:
+            logger.warning("文档生效关系未确认，拒绝普通检索")
+            _record_retrieval("governance_unresolved")
+            return RetrievalDecision(
+                query=query,
+                retrieval_query=retrieval_query,
+                context="",
+                sources=[],
+                raw_results=[],
+                history_summary=history_summary,
+                error="governance_unresolved",
             )
         except Exception as exc:
             logger.exception("Knowledge-base retrieval failed")
@@ -445,6 +457,23 @@ class RagService:
             yield content
             return
         if decision.error:
+            if decision.error == "governance_unresolved":
+                content = (
+                    "当前知识库存在未确认生效关系的文档，普通问答已暂停。\n\n"
+                    "请由文档负责人确认发布部门、版本、生效日期、废止关系和适用范围；"
+                    "确认前请仅通过离线评估或受控运维流程进行版本比较。"
+                )
+                self._last_meta = {
+                    "content": content,
+                    "sources": [],
+                    "thought": "检索状态：文档生效关系未确认",
+                    "action_failed": True,
+                    "error_code": "document_governance_unresolved",
+                    "fallback_allowed": False,
+                    "draft_allowed": False,
+                }
+                yield content
+                return
             content = "抱歉，知识库检索服务暂时不可用，请稍后重试。"
             self._last_meta = {
                 "content": content,

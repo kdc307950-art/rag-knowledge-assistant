@@ -17,9 +17,13 @@ from ..config import (
     USE_HYBRID_SEARCH,
     VECTOR_WRITE_BATCH_SIZE,
 )
-from ..core.exceptions import DocumentException, KnowledgeBaseBusyError
+from ..core.exceptions import DocumentException, DocumentGovernanceError, KnowledgeBaseBusyError
 from ..storage.embedding import get_embedding_model
-from ..storage.document_governance import metadata_for_source
+from ..storage.document_governance import (
+    metadata_for_source,
+    retrieval_policy,
+    source_allowed_for_retrieval,
+)
 from ..storage.kb_manifest import ManifestSnapshot, get_manifest
 from ..rag.chunker import create_parent_child_chunks, split_by_chapters
 
@@ -34,9 +38,24 @@ _batch_mutated = False
 _destructive_mutation = False
 
 
-def _active_revision_filter(snapshot: ManifestSnapshot) -> dict | None:
-    """把逻辑版本快照转换成 Chroma 过滤条件；空库返回 ``None``。"""
-    revisions = sorted(set(snapshot.active_revisions.values()))
+def _active_revision_filter(
+    snapshot: ManifestSnapshot,
+    *,
+    policy: str | None = None,
+) -> dict | None:
+    """将文档治理策略转换为可见 revision；未确认时整个普通检索 fail-closed。"""
+    manifest = get_manifest()
+    policy = policy or retrieval_policy()
+    # ``unresolved`` is a deployment state, not an incomplete authority filter.
+    # Returning the subset that happens to be authoritative would silently
+    # conceal an unresolved relationship in another active source.
+    if policy == "unresolved" and snapshot.active_revisions:
+        raise DocumentGovernanceError("文档生效关系未确认")
+    revisions: list[str] = []
+    for source, revision in snapshot.active_revisions.items():
+        metadata = manifest.get_source_metadata(source) or metadata_for_source(source)
+        if source_allowed_for_retrieval(metadata, policy=policy):
+            revisions.append(revision)
     if not revisions:
         return None
     return {"revision_id": {"$in": revisions}}
@@ -204,7 +223,7 @@ except ImportError:
 _use_hybrid = USE_HYBRID_SEARCH and _hybrid_available
 
 
-def ensure_bm25(collection=None) -> None:
+def ensure_bm25(collection=None, *, retrieval_policy: str | None = None) -> None:
     """知识库变更后按需重建 BM25 索引。"""
     global _bm25_dirty
     if not _use_hybrid:
@@ -217,7 +236,7 @@ def ensure_bm25(collection=None) -> None:
         # 延迟到首次检索或写入结束后重建，避免每个分块写入都重复构建倒排索引。
         target = collection or get_kb_collection()
         snapshot = _ensure_manifest_initialized(target)
-        where = _active_revision_filter(snapshot)
+        where = _active_revision_filter(snapshot, policy=retrieval_policy)
         if where is None:
             rebuild_bm25(target, where={"revision_id": "__no_active_revision__"})
         else:
@@ -230,7 +249,8 @@ def _refresh_indexes_after_mutation(collection) -> None:
     global _bm25_dirty
     _bm25_dirty = True
     try:
-        ensure_bm25(collection)
+        # 派生索引保留全部可比较的 active 文档；实际查询仍按本次治理策略过滤。
+        ensure_bm25(collection, retrieval_policy="all_active")
     except Exception:
         # 保留 dirty 状态，让下一次混合检索重试重建；数据操作和缓存失效不能
         # 因派生索引瞬时失败而被误报为失败。
@@ -443,8 +463,13 @@ def add_document_to_kb(
                     f"新版本分块校验失败：预期 {len(added_ids)}，实际 {len(staged_ids)}"
                 )
 
-            manifest.commit_source(file_name, revision_id, content_hash, len(added_ids))
-            manifest.set_source_metadata(file_name, governance_metadata)
+            manifest.commit_source(
+                file_name,
+                revision_id,
+                content_hash,
+                len(added_ids),
+                metadata=governance_metadata,
+            )
             active_metas = []
             for metadata in list(staged.get("metadatas") or []):
                 updated = dict(metadata or {})
@@ -615,14 +640,19 @@ def update_doc_count() -> None:
     )
 
 
-def search(query_text: str, n_results: int = 10):
+def search(
+    query_text: str,
+    n_results: int = 10,
+    *,
+    retrieval_policy: str | None = None,
+):
     with _MUTATION_CONDITION:
         if _batch_update_depth > 0 or _destructive_mutation:
             raise KnowledgeBaseBusyError("知识库正在更新")
         with _VECTOR_LOCK:
             collection = get_kb_collection()
             snapshot = _snapshot_for_read(collection)
-            where = _active_revision_filter(snapshot)
+            where = _active_revision_filter(snapshot, policy=retrieval_policy)
             if where is None:
                 return {
                     "ids": [[]],
@@ -644,7 +674,12 @@ def search(query_text: str, n_results: int = 10):
             return results
 
 
-def hybrid_search_wrapper(query_text: str, n_results: int = 50):
+def hybrid_search_wrapper(
+    query_text: str,
+    n_results: int = 50,
+    *,
+    retrieval_policy: str | None = None,
+):
     if not _use_hybrid:
         return search(query_text, n_results=n_results)
     with _MUTATION_CONDITION:
@@ -653,7 +688,7 @@ def hybrid_search_wrapper(query_text: str, n_results: int = 50):
         with _VECTOR_LOCK:
             collection = get_kb_collection()
             snapshot = _snapshot_for_read(collection)
-            where = _active_revision_filter(snapshot)
+            where = _active_revision_filter(snapshot, policy=retrieval_policy)
             if where is None:
                 return {
                     "ids": [[]],
@@ -663,7 +698,7 @@ def hybrid_search_wrapper(query_text: str, n_results: int = 50):
                     "_kb_generation": snapshot.generation,
                 }
             # 混合检索将关键词匹配与向量语义召回合并，对专有名词更稳健。
-            ensure_bm25(collection)
+            ensure_bm25(collection, retrieval_policy=retrieval_policy)
             results = hybrid_search(
                 query_text,
                 collection,

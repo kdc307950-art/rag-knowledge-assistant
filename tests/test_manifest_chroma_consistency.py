@@ -50,6 +50,10 @@ def real_store(monkeypatch, tmp_path):
     monkeypatch.setattr(vector_store, "_batch_mutated", False)
     monkeypatch.setattr(vector_store, "_destructive_mutation", False)
     monkeypatch.setattr(vector_store, "_bm25_dirty", True)
+    # This fixture tests manifest/Chroma visibility, not document-control
+    # approval. Keep governance policy explicit so the storage tests do not
+    # depend on the application's unresolved production lock.
+    monkeypatch.setattr(vector_store, "retrieval_policy", lambda: "all_active")
     return vector_store, collection, manifest
 
 

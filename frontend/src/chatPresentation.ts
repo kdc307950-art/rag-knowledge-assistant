@@ -6,6 +6,7 @@ const STREAM_ERROR_TITLES: Record<string, string> = {
   model_not_found: "模型配置不可用",
   empty_response: "模型未返回有效内容",
   retrieval_error: "知识库检索服务不可用",
+  document_governance_unresolved: "文档生效关系尚未确认",
   generation_error: "回答生成异常",
 };
 

@@ -54,13 +54,20 @@ def test_evaluator_calls_retrieval_directly_and_calculates_metrics(monkeypatch, 
     monkeypatch.setattr(eval_retrieval, "retrieve_context", fake_retrieve)
     report = eval_retrieval.evaluate(cases_path)
 
-    assert all(kwargs == {"return_raw": True} for _query, kwargs in calls)
+    assert calls == [
+        ("命中", {"return_raw": True, "retrieval_policy": "authoritative"}),
+        ("无答案", {"return_raw": True, "retrieval_policy": "all_active"}),
+    ]
     assert report["metrics"]["recall_at_1"] == 1.0
     assert report["metrics"]["recall_at_3"] == 1.0
     assert report["metrics"]["mrr"] == 1.0
     assert report["metrics"]["refusal_accuracy"] == 1.0
     assert report["metrics"]["answerable_false_refusal_rate"] == 0.0
     assert report["metrics"]["evidence_recall_at_1"] is None
+    assert report["config"]["document_governance_policy"] in {
+        "unresolved", "authoritative", "all_active"
+    }
+    assert report["config"]["document_governance_sha256"]
 
 
 def test_evaluator_rejects_ambiguous_case_schema(tmp_path):

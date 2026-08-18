@@ -139,13 +139,24 @@ class KnowledgeBaseManifest:
             finally:
                 connection.close()
 
-    def set_source_metadata(self, source: str, metadata: dict) -> None:
-        """Persist validated source governance metadata without changing generation."""
+    def set_source_metadata(
+        self,
+        source: str,
+        metadata: dict,
+        *,
+        bump_generation: bool = True,
+    ) -> bool:
+        """Persist governance metadata and invalidate generation when it changes."""
         payload = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
         with _MANIFEST_LOCK:
             connection = self._connect()
             try:
                 with connection:
+                    previous = connection.execute(
+                        "SELECT metadata_json FROM source_metadata WHERE source = ?",
+                        (source,),
+                    ).fetchone()
+                    changed = previous is None or str(previous[0]) != payload
                     connection.execute(
                         """
                         INSERT INTO source_metadata(source, metadata_json, updated_at)
@@ -156,6 +167,16 @@ class KnowledgeBaseManifest:
                         """,
                         (source, payload, time.time()),
                     )
+                    if changed and bump_generation:
+                        generation = self._generation(connection) + 1
+                        connection.execute(
+                            """
+                            INSERT INTO manifest_metadata(name, value) VALUES('generation', ?)
+                            ON CONFLICT(name) DO UPDATE SET value = excluded.value
+                            """,
+                            (str(generation),),
+                        )
+                return changed
             finally:
                 connection.close()
 
@@ -165,6 +186,7 @@ class KnowledgeBaseManifest:
         revision_id: str,
         content_hash: str,
         chunk_count: int,
+        metadata: dict | None = None,
     ) -> int:
         """原子切换来源版本并递增逻辑清单代际。"""
         with _MANIFEST_LOCK:
@@ -184,6 +206,18 @@ class KnowledgeBaseManifest:
                         """,
                         (source, revision_id, content_hash, int(chunk_count), time.time()),
                     )
+                    if metadata is not None:
+                        payload = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+                        connection.execute(
+                            """
+                            INSERT INTO source_metadata(source, metadata_json, updated_at)
+                            VALUES(?, ?, ?)
+                            ON CONFLICT(source) DO UPDATE SET
+                                metadata_json = excluded.metadata_json,
+                                updated_at = excluded.updated_at
+                            """,
+                            (source, payload, time.time()),
+                        )
                     connection.execute(
                         """
                         INSERT INTO manifest_metadata(name, value) VALUES('schema_initialized', '1')

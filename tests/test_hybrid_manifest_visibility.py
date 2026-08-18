@@ -35,7 +35,7 @@ def test_bm25_rebuild_type_error_never_retries_without_manifest_filter(monkeypat
     monkeypatch.setattr(vector_store, "rebuild_bm25", broken_rebuild)
 
     try:
-        vector_store.ensure_bm25(object())
+        vector_store.ensure_bm25(object(), retrieval_policy="all_active")
     except TypeError as exc:
         assert "internal implementation error" in str(exc)
     else:

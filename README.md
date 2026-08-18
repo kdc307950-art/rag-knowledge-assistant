@@ -169,6 +169,28 @@ SQLite manifest 原子切换 source -> active revision
 
 Chroma 保存物理分块，`data/kb_manifest.sqlite3` 保存每个来源当前可见的完整版本。manifest 是唯一提交点和唯一知识库代际来源：未提交 staging、残缺重试数据和清理失败留下的旧 revision 都不会进入列表、计数、向量检索或 BM25。检索结果携带 manifest generation；缓存读取前后与写入前后都会复核该代际，防止更新窗口内返回或保存旧答案。
 
+### 文档生效治理
+
+`config/document_governance.json` 是文档可见性的唯一配置来源。当前两份员工手册明确保持 `default_retrieval_policy=unresolved`，因此普通问答会安全暂停，不能根据文件名、修改时间或文本相似度推断哪一份生效。`unresolved` 是部署锁定状态，不会静默检索“恰好看起来权威”的文档子集。
+
+将策略切换到 `authoritative` 前，按 [document-control-evidence-template.md](docs/document-control-evidence-template.md) 完成证据包。权威来源必须有正式版本、生效日期、发布部门、批准人、审批与告知记录、适用范围、替代结论、冲突优先级和可定位的证据引用；同一 `document_family` 只能有一个 `authoritative` + `active` 来源。被替代文档必须是 `superseded` + `archived`，并由当前文档的 `supersedes` 显式关联。
+
+先只预览同步结果：
+
+```powershell
+uv run python scripts/sync_document_governance.py
+```
+
+证据和预览均已复核后，才允许写入 Chroma metadata 与 manifest：
+
+```powershell
+uv run python scripts/sync_document_governance.py --apply
+```
+
+版本比较仅可通过受控离线运维/评估流程执行；普通聊天接口不会提供绕过治理过滤的参数。
+
+审批流程目前以隔离模拟形式预留。它执行 HR → 法务的双人顺序审批，拒绝同一审批人重复签署，并生成带哈希链的 `approval_events.jsonl` 和候选配置；模拟结果不能作为真实批准，也不会自动修改生产配置。详见 [document-control-evidence-template.md](docs/document-control-evidence-template.md)。
+
 ## 代码结构
 
 ```text

@@ -34,6 +34,7 @@ def retrieve_context(
     top_k: int = None,
     return_raw: bool = False,
     return_generation: bool = False,
+    retrieval_policy: str | None = None,
 ):
     """召回并重排候选片段，可同时返回本次检索对应的知识库代际。"""
     # 第一阶段召回候选分块，第二阶段交由重排器筛选可靠上下文。
@@ -45,7 +46,14 @@ def retrieve_context(
     try:
         with timed_stage("retrieval"):
             search_func = get_search_function()
-            results = search_func(query, n_results=n_results)
+            if retrieval_policy is None:
+                results = search_func(query, n_results=n_results)
+            else:
+                results = search_func(
+                    query,
+                    n_results=n_results,
+                    retrieval_policy=retrieval_policy,
+                )
         kb_generation = results.get("_kb_generation")
         documents = results.get("documents") or []
         metadatas = results.get("metadatas") or []

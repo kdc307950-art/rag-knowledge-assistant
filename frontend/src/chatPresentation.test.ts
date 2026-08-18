@@ -36,6 +36,9 @@ describe("chat presentation", () => {
     expect(streamErrorTitle({ code: "rate_limit", message: "额度不足", partial: false })).toBe(
       "模型服务限流或额度不足",
     );
+    expect(
+      streamErrorTitle({ code: "document_governance_unresolved", message: "关系未确认", partial: false }),
+    ).toBe("文档生效关系尚未确认");
     expect(streamErrorTitle({ code: "unknown", message: "错误", partial: false })).toBe("回答失败");
   });
 
