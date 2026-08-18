@@ -54,3 +54,31 @@ def test_metric_helpers_ignore_malformed_values():
     assert "rag_llm_tokens_total{" not in rendered
     assert 'rag_retrievals_total{outcome="error"} 1' in rendered
     assert "rag_retrieval_results_histogram_count" not in rendered
+
+
+def test_llm_cost_metric_and_snapshot_only_accept_estimates():
+    from backend.observability.metrics import (
+        llm_cost_snapshot,
+        mark_llm_cost,
+        render_metrics,
+        reset_metrics,
+    )
+
+    reset_metrics()
+    mark_llm_cost(0.0125, "cny", "exact", "stream")
+    mark_llm_cost(0.5, "USD", "unknown", "request")
+    mark_llm_cost(float("nan"), "CNY", "estimated", "request")
+
+    rendered = render_metrics()
+    assert 'rag_llm_cost_estimated_total{currency="CNY",confidence="exact",mode="stream"} 0.0125' in rendered
+    assert llm_cost_snapshot() == {
+        "estimated": True,
+        "totals": [
+            {
+                "currency": "CNY",
+                "confidence": "exact",
+                "mode": "stream",
+                "amount": 0.0125,
+            }
+        ],
+    }

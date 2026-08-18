@@ -47,6 +47,33 @@ function parseDoneMeta(value: unknown): ChatDoneMeta {
       (source): source is string => typeof source === "string" && source.trim().length > 0,
     );
   }
+  if (Array.isArray(value.source_refs)) {
+    meta.source_refs = value.source_refs.flatMap((reference) => (
+      isRecord(reference)
+      && typeof reference.id === "string"
+      && reference.id.trim().length > 0
+      && typeof reference.label === "string"
+      && reference.label.trim().length > 0
+        ? [{ id: reference.id, label: reference.label }]
+        : []
+    ));
+  }
+  if (isRecord(value.citation_validation)
+    && typeof value.citation_validation.has_citations === "boolean"
+    && Array.isArray(value.citation_validation.cited_ids)
+    && Array.isArray(value.citation_validation.unknown_ids)
+    && typeof value.citation_validation.valid === "boolean") {
+    meta.citation_validation = {
+      has_citations: value.citation_validation.has_citations,
+      cited_ids: value.citation_validation.cited_ids.filter(
+        (id): id is string => typeof id === "string" && id.trim().length > 0,
+      ),
+      unknown_ids: value.citation_validation.unknown_ids.filter(
+        (id): id is string => typeof id === "string" && id.trim().length > 0,
+      ),
+      valid: value.citation_validation.valid,
+    };
+  }
   if (typeof value.thought === "string" || value.thought === null) {
     meta.thought = value.thought;
   }

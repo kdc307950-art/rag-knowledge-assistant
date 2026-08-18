@@ -12,6 +12,7 @@ from ..config import DRAFT_ENABLED, FALLBACK_ENABLED
 from ..core.constants import MAX_GENERATION_QUERY_LENGTH
 from ..core.exceptions import KnowledgeBaseBusyError
 from ..llm.client import generate_answer_stream, needs_history_rewrite, rewrite_query
+from ..llm.groundedness import validate_citations
 from ..llm.prompts import DRAFT_SYSTEM_PROMPT, SYSTEM_PROMPT_TEMPLATE
 from ..llm.schema import AIResponse
 from .cache_service import CacheService
@@ -135,6 +136,24 @@ class RagService:
             f"检索结果：召回 {len(decision.raw_results)} 个片段，选用 {len(decision.sources)} 个来源"
             + (f"\n\n参考文档：{reference}" if reference else "")
         )
+
+    @staticmethod
+    def _source_refs(decision: RetrievalDecision) -> list[dict[str, str]]:
+        """Expose only a per-answer display ID and already-visible source label."""
+        refs: list[dict[str, str]] = []
+        for index, result in enumerate(decision.raw_results, 1):
+            source_id = str(result.get("citation_id") or f"S{index}")
+            label = decision.sources[index - 1] if index <= len(decision.sources) else "未知来源"
+            refs.append({"id": source_id, "label": label})
+        return refs
+
+    @classmethod
+    def _citation_meta(cls, content: str, decision: RetrievalDecision) -> dict[str, object]:
+        refs = cls._source_refs(decision)
+        return {
+            "source_refs": refs,
+            "citation_validation": validate_citations(content, (ref["id"] for ref in refs)),
+        }
 
     def retrieve_only(self, query: str, history: str = "", messages: list | None = None) -> RetrievalDecision:
         """Retrieve once and return the sole RAG decision object without generating."""
@@ -290,6 +309,7 @@ class RagService:
             self._last_meta = {
                 "content": cached["content"],
                 "sources": cached.get("sources", decision.sources),
+                **cached.get("citation_meta", self._citation_meta(cached["content"], decision)),
                 "thought": self._thought(decision),
                 "query": decision.query,
                 "retrieval_query": decision.retrieval_query,
@@ -372,12 +392,20 @@ class RagService:
                 if decision.kb_generation is None:
                     cache_written = self.cache_service.set(
                         cache_key,
-                        {"content": full_response, "sources": decision.sources},
+                        {
+                            "content": full_response,
+                            "sources": decision.sources,
+                            "citation_meta": self._citation_meta(full_response, decision),
+                        },
                     )
                 else:
                     cache_written = self.cache_service.set(
                         cache_key,
-                        {"content": full_response, "sources": decision.sources},
+                        {
+                            "content": full_response,
+                            "sources": decision.sources,
+                            "citation_meta": self._citation_meta(full_response, decision),
+                        },
                         expected_generation=decision.kb_generation,
                     )
                 generation_unchanged = cache_written is not False
@@ -392,6 +420,7 @@ class RagService:
         self._last_meta = {
             "content": full_response,
             "sources": decision.sources,
+            **self._citation_meta(full_response, decision),
             "thought": self._thought(decision),
             "query": decision.query,
             "retrieval_query": decision.retrieval_query,

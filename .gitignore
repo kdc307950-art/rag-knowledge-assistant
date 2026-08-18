@@ -27,6 +27,8 @@ backups/
 .pytest_run/
 .verify_tmp/
 pure_chroma_probe/
+/eval/recovered_sources/
+/eval/results/
 
 # Local audit/probe scripts
 /_*.py

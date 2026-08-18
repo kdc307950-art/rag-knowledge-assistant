@@ -62,6 +62,12 @@ export function messageSources(message: ChatMessage) {
   ) {
     return [];
   }
+  const references = message.meta?.source_refs?.filter(
+    (reference) => reference.id.trim().length > 0 && reference.label.trim().length > 0,
+  ) ?? [];
+  if (references.length > 0) {
+    return references.map((reference) => `[${reference.id}] ${reference.label}`);
+  }
   return message.meta?.sources?.filter((source) => source.trim().length > 0) ?? [];
 }
 

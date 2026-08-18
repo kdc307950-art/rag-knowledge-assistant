@@ -127,7 +127,8 @@ def retrieve_context(
     sources = []
     raw_results = []
 
-    for doc, meta, dist, score in final_items:
+    for index, (doc, meta, dist, score) in enumerate(final_items, 1):
+        citation_id = f"S{index}"
         meta_safe = meta or {}
         source = meta_safe.get("source", "未知文件")
         chapter = meta_safe.get("chapter", "未知章节")
@@ -145,11 +146,12 @@ def retrieve_context(
         location = f"，{'，'.join(location_parts)}" if location_parts else ""
 
         context_parts.append(
-            f"[来源：{source}，章节：{chapter}{location}]\n{context_text}"
+            f"[{citation_id} | 来源：{source}，章节：{chapter}{location}]\n{context_text}"
         )
         sources.append(f"{source} | {chapter}{location}")
 
         raw_results.append({
+            "citation_id": citation_id,
             "document": doc,
             "parent_text": parent_text,
             "parent_id": meta_safe.get("parent_id"),

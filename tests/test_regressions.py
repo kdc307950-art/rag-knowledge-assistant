@@ -544,6 +544,7 @@ def test_retriever_includes_page_and_paragraph_in_sources(monkeypatch):
 
     _, sources, raw = retriever.retrieve_context("question", return_raw=True)
     assert sources == ["manual.pdf | 全文，第 3 页，第 2 段"]
+    assert raw[0]["citation_id"] == "S1"
     assert raw[0]["page"] == 3
     assert raw[0]["paragraph"] == 2
 

@@ -121,6 +121,7 @@ class _MetricSet:
     llm_calls: _Counter
     llm_latency: _Histogram
     llm_tokens: _Counter
+    llm_cost_estimated: _Counter
     cache_hits: _Counter
     cache_misses: _Counter
     errors: _Counter
@@ -191,6 +192,13 @@ class MetricsRegistry:
             ),
             llm_tokens=self._register(
                 _Counter("rag_llm_tokens_total", "LLM token usage", ("type", "mode"))
+            ),
+            llm_cost_estimated=self._register(
+                _Counter(
+                    "rag_llm_cost_estimated_total",
+                    "Estimated LLM cost, not provider billing",
+                    ("currency", "confidence", "mode"),
+                )
             ),
             cache_hits=self._register(
                 _Counter("rag_cache_hits_total", "Cache hits", ("level",))
@@ -376,6 +384,42 @@ def mark_llm_tokens(token_type: str, amount: int | float, mode: str) -> None:
         return
     with registry._lock:
         registry.metrics.llm_tokens.inc(value, normalized_type, str(mode or "unknown"))
+
+
+def mark_llm_cost(amount: float, currency: str, confidence: str, mode: str) -> None:
+    """Record a configured price-table estimate, never an asserted bill."""
+    try:
+        value = float(amount)
+    except (TypeError, ValueError):
+        return
+    normalized_currency = str(currency or "").strip().upper()
+    normalized_confidence = str(confidence or "").strip().lower()
+    if value < 0 or not math.isfinite(value) or not normalized_currency:
+        return
+    if normalized_confidence not in {"exact", "estimated"}:
+        return
+    with registry._lock:
+        registry.metrics.llm_cost_estimated.inc(
+            value,
+            normalized_currency,
+            normalized_confidence,
+            str(mode or "unknown"),
+        )
+
+
+def llm_cost_snapshot() -> dict:
+    """Return current-process estimated cost totals for diagnostics UI."""
+    with registry._lock:
+        totals = [
+            {
+                "currency": key[0],
+                "confidence": key[1],
+                "mode": key[2],
+                "amount": value,
+            }
+            for key, value in sorted(registry.metrics.llm_cost_estimated._values.items())
+        ]
+    return {"estimated": True, "totals": totals}
 
 
 def mark_retrieval(outcome: str, results_count: int = 0, top_score: float | None = None) -> None:

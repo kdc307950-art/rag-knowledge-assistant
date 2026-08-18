@@ -189,6 +189,7 @@ data/                     所有运行数据的默认根目录
 | `OPENAI_BASE_URL` | DashScope 兼容地址 | LLM 服务地址 |
 | `OPENAI_MODEL` | `qwen3.7-max` | LLM 模型名称 |
 | `LLM_STREAM_USAGE_MODE` | `auto` | 流式 usage 采集：`auto` 仅对 DashScope 开启，`on`/`off` 可显式覆盖 |
+| `LLM_PRICE_TABLE_PATH` | `./config/llm_prices.json` | LLM token 价格表；成本只标记为估算，不等同供应商账单 |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-zh-v1.5` | 向量模型 |
 | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | 重排模型 |
 | `HF_HUB_OFFLINE` | `0` | `1` 时禁止在线下载 Hugging Face 模型 |
@@ -305,7 +306,7 @@ FastAPI 启动后会在后台执行一次不阻塞服务启动的轻量自检。
 
 - `GET /api/live`：不鉴权的进程存活探针。
 - `GET /api/ready`：不鉴权的依赖就绪探针；离线模式下模型不可用、依赖异常或 manifest 不一致返回 `503`，在线模式允许首次使用时下载模型，空知识库仍是合法就绪状态。
-- `GET /metrics`：Prometheus 文本格式；使用独立 `METRICS_TOKEN` 或仅允许 loopback。指标包括 HTTP/SSE 终态、首 token 延迟、LLM 调用与供应商返回的 input/output token（缺失时不猜测）、L1/L2 缓存、上传终态、鉴权失败、检索 hit/empty/error/busy、最终片段数、rerank top score、严格拒答和知识库快照。token 计数不是费用估算，费用需要单独配置价格表。
+- `GET /metrics`：Prometheus 文本格式；使用独立 `METRICS_TOKEN` 或仅允许 loopback。指标包括 HTTP/SSE 终态、首 token 延迟、LLM 调用与供应商返回的 input/output token（缺失时不猜测）、价格表驱动的估算成本、L1/L2 缓存、上传终态、鉴权失败、检索 hit/empty/error/busy、最终片段数、rerank top score、严格拒答和知识库快照。成本是估算值，不是供应商账单。
 - `rag_llm_calls_total` 按 SDK 实际调用 attempt 计数；临时网络/限流重试会产生多个 attempt，不等同于用户逻辑请求数。
 - 每个响应带服务端生成的 `X-Request-Id`。SSE 的 HTTP 状态通常为 `200`，业务错误必须看 `error`/`interrupted` 终态；当前无法可靠区分用户主动停止和网络断开。
 - 请求上下文内的 `app.log`/`error.log` 会写入同一 `request_id`；健康检查按请求去重模型鉴权失败链路，避免一次失败的多层包装触发假告警。
@@ -319,6 +320,14 @@ uv run python scripts/health_check.py
 ```
 
 详细边界、SLO、保留期和恢复责任见 [`docs/ops-contract.md`](docs/ops-contract.md)。
+
+### 检索与引用评估
+
+- `scripts/recover_kb_source.py` 只能从备份 Chroma 导出隔离的、可能存在编码损失的重建文本；它不替代原始上传文件，也不会覆盖 live `data/`。
+- `scripts/eval_retrieval.py` 是显式的 LLM-free golden-set 回归命令，输出 Recall@1/3/5、MRR、拒答准确率、评估错误率和配置快照。没有人工审核的 `eval/retrieval_cases.jsonl` 时，命令会失败而不是生成空基线。
+- `scripts/eval_groundedness.py` 只校验回答中的 `[S<n>]` 是否存在于本次来源快照，并汇总人工 claim verdict；它不执行 NLI、不删除已流出的句子，也不把引用存在性当作事实证明。
+- 上传或恢复真实原始文档后，先人工审核案例和回答，再把结果写入 `eval/results/`（该目录默认不入 Git）。
+- 业务分类、visibility 和后续 ACL 的边界见 [`docs/metadata-acl-contract.md`](docs/metadata-acl-contract.md)；当前单口令系统不提供多用户授权。
 
 ### 部署边界
 

@@ -72,6 +72,16 @@ def test_build_diagnostics_does_not_load_models_or_call_llm(monkeypatch):
         lambda: {"count": 0, "recent": [], "truncated": False},
     )
     monkeypatch.setattr(diagnostics_service, "API_KEY", "configured")
+    monkeypatch.setattr(
+        diagnostics_service,
+        "llm_cost_snapshot",
+        lambda: {"estimated": True, "totals": [{"currency": "CNY", "amount": 0.1}]},
+    )
+    monkeypatch.setattr(
+        diagnostics_service,
+        "price_table_status",
+        lambda: {"configured": True, "entries": 1},
+    )
 
     report = diagnostics_service.build_diagnostics()
 
@@ -80,6 +90,11 @@ def test_build_diagnostics_does_not_load_models_or_call_llm(monkeypatch):
     assert report["checks"]["embedding"]["state"] == "available"
     assert report["checks"]["llm"]["network_verified"] is False
     assert report["kb"] == {"document_count": 2, "chunk_count": 5, "generation": 7}
+    assert report["llm_cost"] == {
+        "estimated": True,
+        "totals": [{"currency": "CNY", "amount": 0.1}],
+        "price_table": {"configured": True, "entries": 1},
+    }
 
 
 def test_manifest_count_mismatch_marks_report_unhealthy(monkeypatch):

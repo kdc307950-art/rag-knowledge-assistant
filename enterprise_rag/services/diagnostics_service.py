@@ -13,6 +13,13 @@ from ..storage import vector_store
 from ..storage.embedding import get_model_readiness, get_model_status
 from ..storage.kb_manifest import get_manifest
 from ..utils.logger import _redact
+from ..llm.pricing import price_table_status
+
+try:
+    from backend.observability.metrics import llm_cost_snapshot
+except Exception:  # pragma: no cover - standalone core imports
+    def llm_cost_snapshot() -> dict[str, Any]:
+        return {"estimated": True, "totals": []}
 
 
 _ERROR_TAIL_BYTES = 512 * 1024
@@ -184,4 +191,8 @@ def build_diagnostics() -> dict[str, Any]:
             "generation": generation,
         },
         "errors": recent_error_summary(),
+        "llm_cost": {
+            **llm_cost_snapshot(),
+            "price_table": price_table_status(),
+        },
     }

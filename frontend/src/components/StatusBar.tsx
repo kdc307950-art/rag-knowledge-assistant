@@ -8,6 +8,14 @@ function modelLabel(state?: string) {
   return "异常";
 }
 
+function costLabel(diagnostics: Diagnostics) {
+  const totals = diagnostics.llm_cost?.totals ?? [];
+  if (!totals.length) return diagnostics.llm_cost?.price_table.configured === false ? "成本估算未配置" : "暂无成本数据";
+  return totals
+    .map((item) => `${item.currency} ${item.amount.toFixed(4)}${item.confidence === "estimated" ? "（均价估算）" : ""}`)
+    .join(" · ");
+}
+
 export default function StatusBar() {
   const logout = useAuth((s) => s.logout);
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
@@ -54,6 +62,7 @@ export default function StatusBar() {
             嵌入 {modelLabel(diagnostics.checks.embedding.state)} · 重排 {modelLabel(diagnostics.checks.reranker.state)}
           </span>
         )}
+        {diagnostics && <span className="text-sm text-gray-400">LLM {costLabel(diagnostics)}</span>}
       </div>
       <div className="flex items-center gap-3">
         {diagnostics && diagnostics.errors.count > 0 && (

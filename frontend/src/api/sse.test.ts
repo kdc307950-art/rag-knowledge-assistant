@@ -157,6 +157,25 @@ describe("streamChat", () => {
     expect(received.done).toEqual({ is_kb: true });
   });
 
+  it("parses source references and citation syntax status from done metadata", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      responseFromBytes(
+        'event: done\n'
+        + 'data: {"is_kb":true,"source_refs":[{"id":"S1","label":"手册.pdf | 第 3 页"}],"citation_validation":{"has_citations":true,"cited_ids":["S1"],"unknown_ids":[],"valid":true}}\n\n',
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const received = callbacks();
+
+    await streamChat("问题", { signal: new AbortController().signal, ...received });
+
+    expect(received.done).toEqual({
+      is_kb: true,
+      source_refs: [{ id: "S1", label: "手册.pdf | 第 3 页" }],
+      citation_validation: { has_citations: true, cited_ids: ["S1"], unknown_ids: [], valid: true },
+    });
+  });
+
   it("keeps action metadata and canonical retrieval inputs for React follow-up actions", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       responseFromBytes(

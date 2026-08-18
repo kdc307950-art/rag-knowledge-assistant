@@ -47,6 +47,19 @@ export interface Diagnostics {
       message: string;
     }>;
   };
+  llm_cost?: {
+    estimated: boolean;
+    price_table: {
+      configured: boolean;
+      entries: number;
+    };
+    totals: Array<{
+      currency: string;
+      confidence: "exact" | "estimated";
+      mode: string;
+      amount: number;
+    }>;
+  };
 }
 
 export const getHealth = () => request<Health>("/health");

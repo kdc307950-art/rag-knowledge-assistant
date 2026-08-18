@@ -83,6 +83,11 @@ export default function MessageList({
                   </ol>
                 </details>
               )}
+              {message.meta?.citation_validation?.valid === false && (
+                <p className="mt-1 text-xs text-amber-700">
+                  回答包含无法对应本次资料的引用标识，建议复核。
+                </p>
+              )}
               {showDebug && message.meta?.thought && (
                 <details className="mt-2 border-t border-gray-100 pt-2 text-xs text-gray-600">
                   <summary className="cursor-pointer text-gray-700">回答依据</summary>

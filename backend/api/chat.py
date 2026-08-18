@@ -32,6 +32,8 @@ _GREETING_REPLY = (
 # 只向客户端透传 UI 需要的元数据键，避免泄露内部字段。
 _META_KEYS = (
     "sources",
+    "source_refs",
+    "citation_validation",
     "thought",
     "is_reject",
     "is_kb_busy",

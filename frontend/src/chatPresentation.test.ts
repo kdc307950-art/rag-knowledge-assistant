@@ -19,6 +19,14 @@ describe("chat presentation", () => {
     expect(messageSources(assistant({ sources: ["制度.pdf"], is_kb: true, is_kb_stale: true }))).toEqual([]);
   });
 
+  it("prefers stable source identifiers when the server provides them", () => {
+    expect(messageSources(assistant({
+      is_kb: true,
+      sources: ["legacy.pdf"],
+      source_refs: [{ id: "S1", label: "员工手册.pdf | 第 3 页" }],
+    }))).toEqual(["[S1] 员工手册.pdf | 第 3 页"]);
+  });
+
   it("distinguishes strict rejection and knowledge-base updates", () => {
     expect(messageStatusLabel(assistant({ is_reject: true }))).toContain("严格知识库模式");
     expect(messageStatusLabel(assistant({ is_kb_busy: true }))).toContain("正在更新");

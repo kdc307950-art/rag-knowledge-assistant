@@ -53,11 +53,6 @@ def get_llm():
     return _client
 
 
-@retry(
-    retry=retry_if_exception(_is_retryable_llm_error),
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=1, max=8),
-)
 def _stream_usage_enabled() -> bool:
     mode = LLM_STREAM_USAGE_MODE
     if mode in {"on", "true", "1"}:
@@ -67,6 +62,11 @@ def _stream_usage_enabled() -> bool:
     return "dashscope.aliyuncs.com" in BASE_URL.lower()
 
 
+@retry(
+    retry=retry_if_exception(_is_retryable_llm_error),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+)
 def _call_llm(messages, stream=False, *, include_usage: bool | None = None):
     started = time.perf_counter()
     mode = "stream" if stream else "request"
@@ -177,6 +177,31 @@ def _record_llm_tokens(mode: str, usage: Mapping[str, int | float] | None) -> No
             logger.debug("记录 LLM token 指标失败", exc_info=True)
 
 
+def _record_llm_cost(mode: str, usage: Mapping[str, int | float] | None) -> None:
+    if not usage:
+        return
+    try:
+        from backend.observability.metrics import mark_llm_cost
+        from .pricing import estimate_cost
+
+        estimate = estimate_cost(dict(usage))
+        if estimate.amount is not None and estimate.currency:
+            mark_llm_cost(
+                estimate.amount,
+                estimate.currency,
+                estimate.confidence,
+                mode,
+            )
+    except Exception:
+        logger.debug("记录 LLM 成本估算失败", exc_info=True)
+
+
+def _record_llm_usage(mode: str, usage: Mapping[str, int | float] | None) -> None:
+    if usage:
+        _record_llm_tokens(mode, usage)
+        _record_llm_cost(mode, usage)
+
+
 def _record_llm(
     mode: str,
     duration: float,
@@ -189,8 +214,7 @@ def _record_llm(
         mark_llm_call(mode, duration)
     except Exception:
         logger.debug("记录 LLM 指标失败", exc_info=True)
-    if usage:
-        _record_llm_tokens(mode, usage)
+    _record_llm_usage(mode, usage)
 
 
 def needs_history_rewrite(history: str, question: str) -> bool:
@@ -282,7 +306,7 @@ def generate_answer_stream(system_prompt: str, chat_history: list):
         logger.error("答案生成失败: %s", exc, exc_info=True)
         raise LLMException(f"答案生成失败: {exc}") from exc
     finally:
-        _record_llm_tokens("stream", usage)
+        _record_llm_usage("stream", usage)
         close = getattr(response, "close", None)
         if callable(close):
             try:

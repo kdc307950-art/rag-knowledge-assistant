@@ -70,6 +70,9 @@ LLM_MODEL = os.getenv("OPENAI_MODEL", "qwen3.7-max")
 LLM_STREAM_USAGE_MODE = os.getenv("LLM_STREAM_USAGE_MODE", "auto").strip().lower()
 if LLM_STREAM_USAGE_MODE not in {"auto", "on", "true", "1", "off", "false", "0"}:
     LLM_STREAM_USAGE_MODE = "auto"
+LLM_PRICE_TABLE_PATH = Path(
+    os.getenv("LLM_PRICE_TABLE_PATH", str(PROJECT_ROOT / "config" / "llm_prices.json"))
+).expanduser()
 MODEL_NAME = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
 # DashScope 与 OpenAI 可能同时配置在同一台机器上。连接 DashScope 时优先使用
 # 服务商专用变量，避免把全局 OPENAI_API_KEY 误发给 DashScope 并触发 401。

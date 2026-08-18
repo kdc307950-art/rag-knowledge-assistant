@@ -27,7 +27,7 @@ access 日志只包含模板路由、方法、状态、耗时、SSE 业务终态
 
 SSE 的 HTTP 状态通常是 `200`，因此错误率必须使用业务终态：`ok`、`error`、`interrupted`。中断原因当前无法可靠区分用户点击停止与网络断开，所以 `interrupted` 不参与“模型故障”告警。
 
-LLM 指标按 SDK 实际调用尝试计数；tenacity 重试会产生多个 attempt，这是故意保留的稳定性信号，不把它伪装成一次逻辑请求。`rag_llm_tokens_total` 只记录供应商实际返回的 input/output token，缺失或中断时保持未知，不用字符数估算，也不把 token 数冒充费用。流式 usage 默认仅对 DashScope 兼容地址开启；自定义 OpenAI-compatible 地址需将 `LLM_STREAM_USAGE_MODE=on` 显式打开。检索指标按最终去重且过阈值的结果记录 `hit/empty/error/busy`，拒答只在严格知识库拒答分支计数；检索、重排和 LLM 生成的阶段耗时写入 access 事件。
+LLM 指标按 SDK 实际调用尝试计数；tenacity 重试会产生多个 attempt，这是故意保留的稳定性信号，不把它伪装成一次逻辑请求。`rag_llm_tokens_total` 只记录供应商实际返回的 input/output token，缺失或中断时保持未知，不用字符数估算。`rag_llm_cost_estimated_total` 只按 `LLM_PRICE_TABLE_PATH` 的价格表计算，精确匹配标记 `exact`，均价降级标记 `estimated`，无价格时不生成成本；任何成本都不是供应商账单。流式 usage 默认仅对 DashScope 兼容地址开启；自定义 OpenAI-compatible 地址需将 `LLM_STREAM_USAGE_MODE=on` 显式打开。检索指标按最终去重且过阈值的结果记录 `hit/empty/error/busy`，拒答只在严格知识库拒答分支计数；检索、重排和 LLM 生成的阶段耗时写入 access 事件。
 
 ## 备份边界
 

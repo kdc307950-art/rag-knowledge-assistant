@@ -134,6 +134,13 @@ def test_auto_mode_keeps_custom_openai_compatible_endpoint_unchanged(monkeypatch
     assert "stream_options" not in calls[0]
 
 
+def test_llm_call_retains_retry_policy_after_usage_configuration():
+    from enterprise_rag.llm import client
+
+    assert hasattr(client._call_llm, "retry")
+    assert not hasattr(client._stream_usage_enabled, "retry")
+
+
 def test_stream_usage_accepts_mapping_chunks(monkeypatch):
     from enterprise_rag.llm import client
 

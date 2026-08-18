@@ -4,6 +4,13 @@ export type ChatAction = "general" | "draft";
 
 export interface ChatDoneMeta {
   sources?: string[];
+  source_refs?: Array<{ id: string; label: string }>;
+  citation_validation?: {
+    has_citations: boolean;
+    cited_ids: string[];
+    unknown_ids: string[];
+    valid: boolean;
+  };
   thought?: string | null;
   is_reject?: boolean;
   is_kb_busy?: boolean;
