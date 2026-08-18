@@ -73,6 +73,12 @@ if LLM_STREAM_USAGE_MODE not in {"auto", "on", "true", "1", "off", "false", "0"}
 LLM_PRICE_TABLE_PATH = Path(
     os.getenv("LLM_PRICE_TABLE_PATH", str(PROJECT_ROOT / "config" / "llm_prices.json"))
 ).expanduser()
+DOCUMENT_GOVERNANCE_PATH = Path(
+    os.getenv(
+        "RAG_DOCUMENT_GOVERNANCE_PATH",
+        str(PROJECT_ROOT / "config" / "document_governance.json"),
+    )
+).expanduser()
 MODEL_NAME = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
 # DashScope、DeepSeek 与 OpenAI 可能同时配置在同一台机器上。连接已识别的
 # 服务商时优先使用专用变量，避免把其他服务的 OPENAI_API_KEY 误发出去。

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "default_retrieval_policy": "unresolved",
+  "documents": {
+    "2025版新劳动合同法下的企业员工手册.md": {
+      "document_family": "employee_handbook",
+      "version": "unconfirmed",
+      "effective_from": null,
+      "effective_to": null,
+      "authority_level": "unconfirmed",
+      "retrieval_status": "active"
+    },
+    "企业员工手册（2025版）.md": {
+      "document_family": "employee_handbook",
+      "version": "unconfirmed",
+      "effective_from": null,
+      "effective_to": null,
+      "authority_level": "unconfirmed",
+      "retrieval_status": "active"
+    }
+  },
+  "notes": [
+    "两份手册均未在正文中给出可核验的发布日期、生效日期或废止关系。",
+    "在 authority_level 明确前，不启用 authoritative_only 的运行时过滤。",
+    "确认发布部门、生效日期和废止关系后，再更新本文件、Chroma metadata 与 manifest。"
+  ]
+}

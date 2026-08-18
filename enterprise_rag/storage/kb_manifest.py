@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
@@ -53,6 +54,15 @@ class KnowledgeBaseManifest:
             CREATE TABLE IF NOT EXISTS manifest_metadata (
                 name TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS source_metadata (
+                source TEXT PRIMARY KEY,
+                metadata_json TEXT NOT NULL,
+                updated_at REAL NOT NULL
             )
             """
         )
@@ -113,6 +123,42 @@ class KnowledgeBaseManifest:
             finally:
                 connection.close()
 
+    def get_source_metadata(self, source: str) -> dict:
+        """Read governance metadata stored alongside the active source pointer."""
+        with _MANIFEST_LOCK:
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    "SELECT metadata_json FROM source_metadata WHERE source = ?",
+                    (source,),
+                ).fetchone()
+                if row is None:
+                    return {}
+                payload = json.loads(str(row[0]))
+                return payload if isinstance(payload, dict) else {}
+            finally:
+                connection.close()
+
+    def set_source_metadata(self, source: str, metadata: dict) -> None:
+        """Persist validated source governance metadata without changing generation."""
+        payload = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        with _MANIFEST_LOCK:
+            connection = self._connect()
+            try:
+                with connection:
+                    connection.execute(
+                        """
+                        INSERT INTO source_metadata(source, metadata_json, updated_at)
+                        VALUES(?, ?, ?)
+                        ON CONFLICT(source) DO UPDATE SET
+                            metadata_json = excluded.metadata_json,
+                            updated_at = excluded.updated_at
+                        """,
+                        (source, payload, time.time()),
+                    )
+            finally:
+                connection.close()
+
     def commit_source(
         self,
         source: str,
@@ -165,6 +211,9 @@ class KnowledgeBaseManifest:
                     cursor = connection.execute(
                         "DELETE FROM source_manifest WHERE source = ?", (source,)
                     )
+                    connection.execute(
+                        "DELETE FROM source_metadata WHERE source = ?", (source,)
+                    )
                     changed = cursor.rowcount > 0
                     if changed:
                         generation = self._generation(connection) + 1
@@ -195,6 +244,7 @@ class KnowledgeBaseManifest:
                         "SELECT COUNT(*) FROM source_manifest"
                     ).fetchone()[0]
                     connection.execute("DELETE FROM source_manifest")
+                    connection.execute("DELETE FROM source_metadata")
                     connection.execute(
                         """
                         INSERT INTO manifest_metadata(name, value) VALUES('schema_initialized', '1')

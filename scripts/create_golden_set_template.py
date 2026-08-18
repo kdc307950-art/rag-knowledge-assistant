@@ -30,6 +30,7 @@ def create_template(output: Path, count: int = 20) -> None:
             "schema_version": 2,
             "case_id": f"retrieval_{index:03d}",
             "query": query,
+            "source_policy": "all_required" if tag == "multi_document" else "authoritative_only",
             "expected_sources": [],
             "expected_evidence": [],
             "expected_refusal": refusal,

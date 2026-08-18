@@ -14,10 +14,12 @@ new cases so a single large source can be evaluated at evidence level:
 {"schema_version":2,"case_id":"policy-001","query":"...","tags":["proper_noun"],"expected_sources":["policy.txt"],"expected_evidence":[{"source":"policy.txt","chapter":"报销"}],"expected_refusal":false}
 ```
 
-Allowed tags are `no_answer`, `multi_document`, `proper_noun`,
-`history_followup`, and `expected_refusal`. A history-followup case may keep a
-`history` field for documentation, but this pure-retrieval evaluator ignores
-it by design; query rewriting must be evaluated separately.
+Tags are corpus-defined metadata. The evaluator accepts stable ASCII
+identifiers such as `HR`, `finance`, `proper_noun`, `sensitive`, and
+`expected_refusal` (letters, digits, `_`, and `-` only), preserves them in the
+report, and does not use them as hidden scoring logic. A history-followup case
+may keep a `history` field for documentation, but this pure-retrieval
+evaluator ignores it by design; query rewriting must be evaluated separately.
 
 Refusal cases set `expected_refusal: true` and leave `expected_sources` empty.
 Answerable v2 cases list one or more exact source names and manually reviewed
@@ -27,6 +29,20 @@ primary metric when the knowledge base contains one large source document. The
 set must be manually reviewed against the real source files; synthetic or
 guessed labels are not a valid baseline. v1 remains readable for migration but
 does not produce evidence metrics.
+
+When multiple active documents contain the same policy, ordinary factual cases
+should name one canonical source only. Require all sources only for an explicit
+multi-document comparison case; otherwise duplicate documents distort recall.
+
+## Source Policies
+
+Schema v2 may set `source_policy` to `authoritative_only`, `all_required`, or
+`any_equivalent`. The last form also requires `source_groups`, where one hit in
+each group is sufficient. Reports retain the legacy `recall_at_k` fields and
+add `authoritative_recall_at_k`, `multi_document_coverage_at_k`, and
+`any_equivalent_hit_rate_at_k`. The active handbook pair currently uses
+`any_equivalent` because publication and effective-date evidence is not present
+in either source; this is an interim evaluation policy, not an authority claim.
 
 Generate a neutral authoring template after loading a new corpus:
 

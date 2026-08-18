@@ -19,6 +19,7 @@ from ..config import (
 )
 from ..core.exceptions import DocumentException, KnowledgeBaseBusyError
 from ..storage.embedding import get_embedding_model
+from ..storage.document_governance import metadata_for_source
 from ..storage.kb_manifest import ManifestSnapshot, get_manifest
 from ..rag.chunker import create_parent_child_chunks, split_by_chapters
 
@@ -357,6 +358,7 @@ def add_document_to_kb(
         added_ids: list[str] = []
         chunk_index = 0
         global_parent_index = 0
+        governance_metadata = metadata_for_source(file_name)
 
         def flush_pending_chunks() -> None:
             """将当前小批次向量化并写入 Chroma。"""
@@ -417,6 +419,7 @@ def add_document_to_kb(
                         "parent_text": parent_meta["parent_text"],
                         "chunk_index": chunk_index,
                     }
+                    metadata.update(governance_metadata)
                     # 同一父块通常会拆成多个子块；页码/段落匹配只计算一次。
                     metadata.update(chapter_parent_locations[local_parent_id])
                     pending_chunks.append(child)
@@ -441,6 +444,7 @@ def add_document_to_kb(
                 )
 
             manifest.commit_source(file_name, revision_id, content_hash, len(added_ids))
+            manifest.set_source_metadata(file_name, governance_metadata)
             active_metas = []
             for metadata in list(staged.get("metadatas") or []):
                 updated = dict(metadata or {})

@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -38,13 +39,34 @@ from enterprise_rag.rag.retriever import retrieve_context  # noqa: E402
 SCHEMA_VERSION = 2
 SUPPORTED_SCHEMA_VERSIONS = {1, SCHEMA_VERSION}
 K_VALUES = (1, 3, 5)
-SUPPORTED_TAGS = {
-    "no_answer",
-    "multi_document",
-    "proper_noun",
-    "history_followup",
-    "expected_refusal",
-}
+TAG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+SOURCE_POLICIES = {"authoritative_only", "all_required", "any_equivalent"}
+
+
+def _validate_tags(path: Path, line_number: int, value: Any) -> list[str]:
+    """Validate corpus-defined tags without coupling scoring to one domain."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or any(
+        not isinstance(tag, str) or not TAG_PATTERN.fullmatch(tag) for tag in value
+    ):
+        raise ValueError(
+            f"{path}:{line_number} tags 必须是 ASCII 标识符数组（字母/数字/下划线/连字符）"
+        )
+    return list(dict.fromkeys(value))
+
+
+def _validate_source_groups(path: Path, line_number: int, value: Any) -> list[list[str]]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{path}:{line_number} any_equivalent 必须包含非空 source_groups")
+    groups: list[list[str]] = []
+    for group in value:
+        if not isinstance(group, list) or not group or any(
+            not isinstance(source, str) or not source.strip() for source in group
+        ):
+            raise ValueError(f"{path}:{line_number} source_groups 必须是非空字符串数组的数组")
+        groups.append(list(dict.fromkeys(str(source) for source in group)))
+    return groups
 
 
 def _load_cases(path: Path) -> tuple[list[dict[str, Any]], str]:
@@ -72,12 +94,34 @@ def _load_cases(path: Path) -> tuple[list[dict[str, Any]], str]:
             raise ValueError(
                 f"{path}:{line_number} review_status 必须为 approved；模板或未审核案例不能跑基线"
             )
-        tags = record.get("tags") or []
-        if not isinstance(tags, list) or any(tag not in SUPPORTED_TAGS for tag in tags):
-            raise ValueError(f"{path}:{line_number} tags 含未知值")
+        tags = _validate_tags(path, line_number, record.get("tags"))
         expected_sources = record.get("expected_sources") or []
         if not isinstance(expected_sources, list) or any(not str(item).strip() for item in expected_sources):
             raise ValueError(f"{path}:{line_number} expected_sources 必须是字符串数组")
+        source_policy = record.get("source_policy")
+        if source_policy is None:
+            # Backward compatibility for v1/v2 files written before source
+            # policy was introduced: one source is authoritative-only, while
+            # multiple sources preserve the historical all-required behavior.
+            source_policy = "all_required" if len(expected_sources) > 1 else "authoritative_only"
+        if source_policy not in SOURCE_POLICIES:
+            raise ValueError(f"{path}:{line_number} source_policy 含未知值")
+        source_groups = record.get("source_groups") or []
+        if source_policy == "any_equivalent":
+            source_groups = _validate_source_groups(path, line_number, source_groups)
+            grouped_sources = {
+                source for group in source_groups for source in group
+            }
+            if expected_sources and not set(map(str, expected_sources)).issubset(grouped_sources):
+                raise ValueError(
+                    f"{path}:{line_number} expected_sources 必须属于 source_groups"
+                )
+            if not expected_sources:
+                expected_sources = sorted(grouped_sources)
+        elif source_groups:
+            raise ValueError(
+                f"{path}:{line_number} source_groups 只能用于 any_equivalent"
+            )
         expected_refusal = bool(record.get("expected_refusal", False))
         expected_evidence = record.get("expected_evidence") or []
         if not isinstance(expected_evidence, list):
@@ -94,9 +138,18 @@ def _load_cases(path: Path) -> tuple[list[dict[str, Any]], str]:
             raise ValueError(f"{path}:{line_number} v2 可回答案例必须人工标注 expected_evidence")
         if expected_refusal and expected_sources:
             raise ValueError(f"{path}:{line_number} 拒答案例不能同时指定 expected_sources")
-        if not expected_refusal and not expected_sources and "no_answer" not in tags:
+        if (
+            not expected_refusal
+            and not expected_sources
+            and source_policy != "any_equivalent"
+            and "no_answer" not in tags
+        ):
             raise ValueError(
                 f"{path}:{line_number} 非拒答案例必须指定 expected_sources，或标记 no_answer"
+            )
+        if not expected_refusal and source_policy == "authoritative_only" and len(expected_sources) != 1:
+            raise ValueError(
+                f"{path}:{line_number} authoritative_only 必须指定一个 expected_sources"
             )
         if expected_refusal and "expected_refusal" not in tags:
             raise ValueError(f"{path}:{line_number} 拒答案例必须包含 expected_refusal 标签")
@@ -105,6 +158,8 @@ def _load_cases(path: Path) -> tuple[list[dict[str, Any]], str]:
         record["expected_refusal"] = expected_refusal
         record["expected_evidence"] = expected_evidence
         record["schema_version"] = schema_version
+        record["source_policy"] = source_policy
+        record["source_groups"] = source_groups
         if review_status is not None:
             record["review_status"] = review_status
         records.append(record)
@@ -140,14 +195,64 @@ def _evidence_matches(expected: dict[str, Any], result: dict[str, Any]) -> bool:
     return True
 
 
-def _evidence_at(raw_results: list[dict[str, Any]], k: int, expected: list[dict[str, Any]]) -> float | None:
+def _evidence_at(
+    raw_results: list[dict[str, Any]],
+    k: int,
+    expected: list[dict[str, Any]],
+    *,
+    policy: str = "all_required",
+    source_groups: list[list[str]] | None = None,
+) -> float | None:
     if not expected:
         return None
+    if policy == "any_equivalent":
+        groups = source_groups or []
+        if not groups:
+            return None
+        matched_groups = 0
+        for group in groups:
+            group_expected = [
+                item for item in expected if str(item.get("source") or "") in group
+            ]
+            if any(
+                any(_evidence_matches(item, result) for item in group_expected)
+                for result in raw_results[:k]
+            ):
+                matched_groups += 1
+        return matched_groups / len(groups)
     matched = sum(
         any(_evidence_matches(item, result) for result in raw_results[:k])
         for item in expected
     )
     return matched / len(expected)
+
+
+def _source_policy_score(
+    raw_results: list[dict[str, Any]],
+    k: int,
+    *,
+    policy: str,
+    expected_sources: list[str],
+    source_groups: list[list[str]],
+) -> float | None:
+    ranked = _sources_at(raw_results, k)
+    if policy == "any_equivalent":
+        if not source_groups:
+            return None
+        return sum(bool(ranked.intersection(group)) for group in source_groups) / len(source_groups)
+    if not expected_sources:
+        return None
+    if policy == "authoritative_only":
+        return float(expected_sources[0] in ranked)
+    return len(set(expected_sources) & ranked) / len(expected_sources)
+
+
+def _source_policy_sources(
+    *, policy: str, expected_sources: list[str], source_groups: list[list[str]]
+) -> set[str]:
+    if policy == "any_equivalent":
+        return {source for group in source_groups for source in group}
+    return set(expected_sources)
 
 
 def _evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
@@ -178,21 +283,34 @@ def _evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
 
     ranked_sources = [str(item.get("source") or "") for item in raw_results]
     expected = set(case["expected_sources"])
+    source_policy = str(case.get("source_policy") or "authoritative_only")
+    source_groups = case.get("source_groups") or []
     expected_evidence = case.get("expected_evidence", [])
     is_refusal = not bool(raw_results)
     recalls: dict[str, float | None] = {}
     for k in K_VALUES:
         if case["expected_refusal"]:
             recalls[str(k)] = None
-        elif expected:
-            recalls[str(k)] = len(expected & _sources_at(raw_results, k)) / len(expected)
+        elif expected or source_groups:
+            recalls[str(k)] = _source_policy_score(
+                raw_results,
+                k,
+                policy=source_policy,
+                expected_sources=case["expected_sources"],
+                source_groups=source_groups,
+            )
         else:
             recalls[str(k)] = None
 
     reciprocal_rank = 0.0
-    if expected:
+    expected_for_rank = _source_policy_sources(
+        policy=source_policy,
+        expected_sources=case["expected_sources"],
+        source_groups=source_groups,
+    )
+    if expected_for_rank:
         for index, source in enumerate(ranked_sources, 1):
-            if source in expected:
+            if source in expected_for_rank:
                 reciprocal_rank = 1.0 / index
                 break
     evidence_reciprocal_rank = 0.0
@@ -207,7 +325,9 @@ def _evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
         "status": "ok",
         "expected_refusal": bool(case["expected_refusal"]),
         "actual_refusal": is_refusal,
+        "source_policy": source_policy,
         "expected_sources": case["expected_sources"],
+        "source_groups": source_groups,
         "expected_evidence": expected_evidence,
         "ranked_sources": ranked_sources[:FINAL_TOP_K],
         "ranked_evidence": [
@@ -226,7 +346,14 @@ def _evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
         "recall": recalls,
         "reciprocal_rank": reciprocal_rank,
         "evidence_recall": {
-            str(k): _evidence_at(raw_results, k, expected_evidence) for k in K_VALUES
+            str(k): _evidence_at(
+                raw_results,
+                k,
+                expected_evidence,
+                policy=source_policy,
+                source_groups=source_groups,
+            )
+            for k in K_VALUES
         },
         "evidence_reciprocal_rank": evidence_reciprocal_rank,
     }
@@ -243,6 +370,25 @@ def evaluate(cases_path: Path) -> dict[str, Any]:
         metrics[f"recall_at_{k}"] = sum(values) / len(values) if values else None
     reciprocal_ranks = [item["reciprocal_rank"] for item in answerable]
     metrics["mrr"] = sum(reciprocal_ranks) / len(reciprocal_ranks) if reciprocal_ranks else None
+    policy_metric_names = {
+        "authoritative_only": "authoritative_recall",
+        "all_required": "multi_document_coverage",
+        "any_equivalent": "any_equivalent_hit_rate",
+    }
+    for policy, metric_name in policy_metric_names.items():
+        policy_cases = [item for item in answerable if item.get("source_policy") == policy]
+        for k in K_VALUES:
+            values = [
+                item["recall"][str(k)]
+                for item in policy_cases
+                if item["recall"][str(k)] is not None
+            ]
+            metrics[f"{metric_name}_at_{k}"] = (
+                sum(values) / len(values) if values else None
+            )
+    metrics["source_policy_counts"] = dict(
+        Counter(item.get("source_policy", "unknown") for item in answerable)
+    )
     evidence_cases = [item for item in answerable if item.get("expected_evidence")]
     for k in K_VALUES:
         values = [
