@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "documents": {
+    "2025版新劳动合同法下的企业员工手册.md": {
+      "classification": "policy",
+      "department": "general",
+      "visibility": "all",
+      "owner_id": "",
+      "basis": "正文第二条明确适用于公司全体员工；发布部门、生效证据和密级未提供。"
+    },
+    "企业员工手册（2025版）.md": {
+      "classification": "policy",
+      "department": "general",
+      "visibility": "all",
+      "owner_id": "",
+      "basis": "正文第二条明确适用于全体员工；发布部门、生效证据和密级未提供。"
+    }
+  },
+  "notes": [
+    "department=general 是未证实发布部门时的中性 ACL 分组，不代表 HR 发布。",
+    "visibility=all 仅表示文档正文面向全体员工，不改变文档生效权威关系。",
+    "文档治理 authority_level/retrieval_status 仍由 config/document_governance.json 管理。"
+  ]
+}
