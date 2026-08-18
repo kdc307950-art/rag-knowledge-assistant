@@ -169,3 +169,18 @@ def test_rag_service_returns_governance_message_instead_of_generic_retrieval_err
 
     assert "未确认生效关系" in content
     assert service._last_meta["error_code"] == "document_governance_unresolved"
+
+
+def test_retriever_preserves_governance_error_for_service_layer(monkeypatch):
+    from enterprise_rag.core.exceptions import DocumentGovernanceError
+    from enterprise_rag.rag import retriever
+
+    monkeypatch.setattr(
+        retriever,
+        "get_search_function",
+        lambda: lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            DocumentGovernanceError("unconfirmed")
+        ),
+    )
+    with pytest.raises(DocumentGovernanceError):
+        retriever.retrieve_context("年休假多少天")

@@ -7,7 +7,11 @@ from enterprise_rag.config import (
     RERANK_BATCH_SIZE,
 )
 from enterprise_rag.storage.vector_store import get_search_function
-from enterprise_rag.core.exceptions import KnowledgeBaseBusyError, RetrievalException
+from enterprise_rag.core.exceptions import (
+    DocumentGovernanceError,
+    KnowledgeBaseBusyError,
+    RetrievalException,
+)
 from .reranker import get_reranker
 import logging
 
@@ -67,6 +71,9 @@ def retrieve_context(
         )
     except KnowledgeBaseBusyError:
         # 上传/删除期间没有稳定快照，上层应显示专用忙碌提示而不是普通故障。
+        raise
+    except DocumentGovernanceError:
+        # 生效关系未确认是可识别的治理状态，不能包装成通用检索故障。
         raise
     except Exception as e:
         logger.error(f"检索失败: {e}", exc_info=True)

@@ -45,6 +45,27 @@ def test_bm25_rebuild_type_error_never_retries_without_manifest_filter(monkeypat
     assert vector_store._bm25_dirty is True
 
 
+def test_pure_vector_wrapper_preserves_explicit_retrieval_policy(monkeypatch):
+    """纯向量回退路径必须与混合检索使用同一治理策略。"""
+    from enterprise_rag.storage import vector_store
+
+    calls = []
+
+    def fake_search(query_text, *, n_results, retrieval_policy):
+        calls.append((query_text, n_results, retrieval_policy))
+        return {"ids": [[]]}
+
+    monkeypatch.setattr(vector_store, "_use_hybrid", False)
+    monkeypatch.setattr(vector_store, "search", fake_search)
+
+    assert vector_store.hybrid_search_wrapper(
+        "年休假",
+        n_results=7,
+        retrieval_policy="authoritative",
+    ) == {"ids": [[]]}
+    assert calls == [("年休假", 7, "authoritative")]
+
+
 def test_hybrid_final_candidates_drop_inactive_revisions(monkeypatch):
     """旧 revision 即使进入 BM25 候选，最终结果也只能保留激活版本。"""
     from enterprise_rag.rag import hybrid

@@ -681,7 +681,11 @@ def hybrid_search_wrapper(
     retrieval_policy: str | None = None,
 ):
     if not _use_hybrid:
-        return search(query_text, n_results=n_results)
+        return search(
+            query_text,
+            n_results=n_results,
+            retrieval_policy=retrieval_policy,
+        )
     with _MUTATION_CONDITION:
         if _batch_update_depth > 0 or _destructive_mutation:
             raise KnowledgeBaseBusyError("知识库正在更新")
