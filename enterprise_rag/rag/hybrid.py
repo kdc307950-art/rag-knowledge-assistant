@@ -18,6 +18,7 @@ _BM25_LOCK = threading.RLock()
 bm25_index = None
 doc_id_list: list[str] = []
 documents_list: list[str] = []
+metadatas_list: list[dict] = []
 
 _KEYWORD_STOPWORDS = {
     "谁", "什么", "哪些", "哪个", "为什么", "如何", "怎么", "怎样", "多少",
@@ -87,6 +88,7 @@ def _exact_keyword_ids(query: str, ids: list[str], documents: list[str]) -> list
 
 def rebuild_bm25(collection, where=None):
     """构建一个完整的本地索引，然后通过一次赋值操作将其发布上线."""
+    global bm25_index, doc_id_list, documents_list, metadatas_list
     # 在局部变量中完整构建后一次性发布，查询线程不会读到半成品索引。
     get_kwargs = {"include": ["documents", "metadatas"]}
     if where is not None:
@@ -96,10 +98,10 @@ def rebuild_bm25(collection, where=None):
     documents = list(all_docs.get("documents") or [])
     if not documents:
         with _BM25_LOCK:
-            global bm25_index, doc_id_list, documents_list
             bm25_index = None
             doc_id_list = []
             documents_list = []
+            metadatas_list = []
         return
 
     tokenized_docs = [list(jieba.cut(doc or "")) for doc in documents]
@@ -108,6 +110,7 @@ def rebuild_bm25(collection, where=None):
             bm25_index = None
             doc_id_list = []
             documents_list = []
+            metadatas_list = []
         return
 
     new_index = BM25Okapi(tokenized_docs)
@@ -115,6 +118,7 @@ def rebuild_bm25(collection, where=None):
         bm25_index = new_index
         doc_id_list = ids
         documents_list = documents
+        metadatas_list = [dict(metadata or {}) for metadata in all_docs.get("metadatas") or []]
 
 
 def hybrid_search(query, collection, top_k=10, alpha=0.5, where=None):
@@ -140,6 +144,7 @@ def hybrid_search(query, collection, top_k=10, alpha=0.5, where=None):
         index = bm25_index
         ids = list(doc_id_list)
         indexed_documents = list(documents_list)
+        indexed_metadatas = list(metadatas_list)
     if index is None or not ids:
         top_ids = vec_ids[:top_k]
         # Chroma 不接受空的 ids 列表。全新或已清空的知识库应返回正常的
@@ -150,7 +155,18 @@ def hybrid_search(query, collection, top_k=10, alpha=0.5, where=None):
 
     tokenized_query = list(jieba.cut(query))
     bm25_all_scores = index.get_scores(tokenized_query)
-    bm25_top_indices = np.argsort(bm25_all_scores)[-50:][::-1]
+    if len(indexed_metadatas) != len(ids):
+        # Compatibility with pre-metadata test doubles and old in-process
+        # indexes; the final Chroma read still enforces `where`.
+        visible_indices = list(range(len(ids)))
+    else:
+        visible_indices = [
+            index for index, metadata in enumerate(indexed_metadatas)
+            if _metadata_matches_where(metadata, where)
+        ]
+    bm25_top_indices = sorted(
+        visible_indices, key=lambda index: bm25_all_scores[index], reverse=True
+    )[:50]
     bm25_ids = [ids[i] for i in bm25_top_indices if i < len(ids)]
     bm25_scores = [bm25_all_scores[i] for i in bm25_top_indices if i < len(ids)]
     max_bm25 = max(bm25_scores) if bm25_scores and max(bm25_scores) > 0 else 1.0
@@ -165,7 +181,13 @@ def hybrid_search(query, collection, top_k=10, alpha=0.5, where=None):
             union_dict[doc_id][1] = float(score)
         else:
             union_dict[doc_id] = [0.0, float(score)]
-    for doc_id in _exact_keyword_ids(query, ids, indexed_documents):
+    visible_ids = [ids[index] for index in visible_indices if index < len(ids)]
+    visible_documents = [
+        indexed_documents[index]
+        for index in visible_indices
+        if index < len(indexed_documents)
+    ]
+    for doc_id in _exact_keyword_ids(query, visible_ids, visible_documents):
         if doc_id in union_dict:
             union_dict[doc_id][1] = max(union_dict[doc_id][1], 1.0)
         else:

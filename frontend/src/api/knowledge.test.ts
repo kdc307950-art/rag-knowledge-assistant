@@ -44,4 +44,19 @@ describe("knowledge upload API", () => {
       { method: "DELETE" },
     );
   });
+
+  it("sends ACL metadata as multipart fields when provided", async () => {
+    requestMock.mockResolvedValue({ success: true });
+    await uploadDocuments([new File(["alpha"], "a.txt")], {
+      classification: "policy",
+      department: "hr",
+      visibility: "department",
+    });
+
+    const [, init] = requestMock.mock.calls[0] ?? [];
+    const body = init?.body as FormData;
+    expect(body.get("classification")).toBe("policy");
+    expect(body.get("department")).toBe("hr");
+    expect(body.get("visibility")).toBe("department");
+  });
 });

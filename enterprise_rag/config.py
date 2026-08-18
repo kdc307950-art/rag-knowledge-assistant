@@ -95,6 +95,16 @@ API_KEY = os.getenv(API_KEY_ENV_NAME)
 ENV_SOURCE = _ENV_SOURCES.get(API_KEY_ENV_NAME)
 # 本地开发默认不要求口令；部署到局域网或公网前必须显式配置。
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
+AUTH_MODE = os.getenv("AUTH_MODE", "legacy").strip().lower()
+if AUTH_MODE not in {"legacy", "users"}:
+    AUTH_MODE = "legacy"
+AUTH_DB_PATH = Path(
+    os.getenv("AUTH_DB_PATH", str(RUNTIME_DATA_DIR / "auth.sqlite3"))
+).expanduser()
+AUTH_SECRET = os.getenv("AUTH_SECRET", "")
+AUTH_TOKEN_TTL_SECONDS = max(
+    300, int(_env_float("AUTH_TOKEN_TTL_SECONDS", 8 * 3600, minimum=300))
+)
 METRICS_TOKEN = os.getenv("METRICS_TOKEN", "")
 ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL", "")
 BACKUP_DIR = Path(os.getenv("RAG_BACKUP_DIR", str(PROJECT_ROOT / "backups"))).expanduser()

@@ -189,6 +189,14 @@ uv run python scripts/sync_document_governance.py --apply
 
 版本比较仅可通过受控离线运维/评估流程执行；普通聊天接口不会提供绕过治理过滤的参数。
 
+### 本地用户鉴权（阶段 A）
+
+身份基础设施已预留但默认不改变现有行为。设置 `AUTH_MODE=users` 和 `AUTH_SECRET` 后，使用 `scripts/create_user.py` 创建用户；服务提供 `/api/auth/login`、`/api/auth/me`、`/api/auth/logout`，业务 API 接受 Bearer token，同时保留配置的 `APP_PASSWORD` 作为脚本/监控服务账户兼容通道。当前阶段尚未把用户部门映射到文档 ACL，检索仍按现有治理策略执行。
+
+```powershell
+uv run python scripts/create_user.py alice --department hr --role viewer
+```
+
 审批流程目前以隔离模拟形式预留。它执行 HR → 法务的双人顺序审批，拒绝同一审批人重复签署，并生成带哈希链的 `approval_events.jsonl` 和候选配置；模拟结果不能作为真实批准，也不会自动修改生产配置。详见 [document-control-evidence-template.md](docs/document-control-evidence-template.md)。
 
 ## 代码结构
@@ -226,6 +234,10 @@ data/                     所有运行数据的默认根目录
 | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | 重排模型 |
 | `HF_HUB_OFFLINE` | `0` | `1` 时禁止在线下载 Hugging Face 模型 |
 | `APP_PASSWORD` | 空 | 可选的本地应用访问口令 |
+| `AUTH_MODE` | `legacy` | 用户鉴权模式；`legacy` 保持 X-API-Key，`users` 启用本地 SQLite 用户和 Bearer token |
+| `AUTH_SECRET` | 空 | `users` 模式的 HMAC token 密钥；未设置且无 `APP_PASSWORD` 时拒绝登录 |
+| `AUTH_DB_PATH` | `./data/auth.sqlite3` | 本地用户与 token 吊销记录数据库 |
+| `AUTH_TOKEN_TTL_SECONDS` | `28800` | Bearer token 有效期，最短 300 秒 |
 | `METRICS_TOKEN` | 空 | `/metrics` 的独立访问令牌；未设置时仅允许 loopback |
 | `ALERT_WEBHOOK_URL` | 空 | 外部健康检查的尽力而为 webhook，不写入日志 |
 | `RAG_DATA_DIR` | `<项目根>/data` | 统一迁移缓存、Chroma 与 manifest 的运行数据根目录 |

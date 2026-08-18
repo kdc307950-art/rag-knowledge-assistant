@@ -183,6 +183,40 @@ def test_search_returns_answer_cache_generation(real_store):
     assert result["_kb_generation"] == manifest.snapshot().generation == 1
 
 
+def test_acl_metadata_commits_with_revision_and_filters_vector_search(real_store):
+    """ACL must select revisions before Chroma returns retrieval candidates."""
+    vector_store, collection, manifest = real_store
+    hr = {"id": "hr-1", "department": "hr", "roles": ["viewer"]}
+    finance = {"id": "finance-1", "department": "finance", "roles": ["viewer"]}
+
+    assert vector_store.add_document_to_kb(
+        "hr-private.txt",
+        "new hr private policy",
+        refresh_indexes=False,
+        metadata={"classification": "policy", "department": "hr", "visibility": "private", "owner_id": "hr-1"},
+    ) == "added"
+    assert vector_store.add_document_to_kb(
+        "finance-dept.txt",
+        "new finance department policy",
+        refresh_indexes=False,
+        metadata={"classification": "policy", "department": "finance", "visibility": "department"},
+    ) == "added"
+
+    metadata = manifest.get_source_metadata("hr-private.txt")
+    assert metadata["visibility"] == "private"
+    assert metadata["owner_id"] == "hr-1"
+    active = manifest.get_source("hr-private.txt")
+    staged = collection.get(where={"revision_id": active["active_revision"]}, include=["metadatas"])
+    assert {item["visibility"] for item in staged["metadatas"]} == {"private"}
+
+    hr_result = vector_store.search("new policy", n_results=20, access_context=hr)
+    finance_result = vector_store.search("new policy", n_results=20, access_context=finance)
+    assert {item["source"] for item in hr_result["metadatas"][0]} == {"hr-private.txt"}
+    assert {item["source"] for item in finance_result["metadatas"][0]} == {"finance-dept.txt"}
+    assert vector_store.list_documents(hr) == ["hr-private.txt"]
+    assert vector_store.list_documents(finance) == ["finance-dept.txt"]
+
+
 @pytest.mark.parametrize("use_hybrid", [False, True], ids=["vector", "hybrid"])
 def test_active_upload_batch_rejects_vector_and_hybrid_queries(
     real_store, monkeypatch, use_hybrid

@@ -18,6 +18,7 @@ from ..config import (
     VECTOR_WRITE_BATCH_SIZE,
 )
 from ..core.exceptions import DocumentException, DocumentGovernanceError, KnowledgeBaseBusyError
+from .acl import document_visible_to_user, normalize_acl_metadata
 from ..storage.embedding import get_embedding_model
 from ..storage.document_governance import (
     metadata_for_source,
@@ -42,6 +43,7 @@ def _active_revision_filter(
     snapshot: ManifestSnapshot,
     *,
     policy: str | None = None,
+    access_context: dict | None = None,
 ) -> dict | None:
     """将文档治理策略转换为可见 revision；未确认时整个普通检索 fail-closed。"""
     manifest = get_manifest()
@@ -54,7 +56,9 @@ def _active_revision_filter(
     revisions: list[str] = []
     for source, revision in snapshot.active_revisions.items():
         metadata = manifest.get_source_metadata(source) or metadata_for_source(source)
-        if source_allowed_for_retrieval(metadata, policy=policy):
+        if source_allowed_for_retrieval(metadata, policy=policy) and (
+            access_context is None or document_visible_to_user(metadata, access_context)
+        ):
             revisions.append(revision)
     if not revisions:
         return None
@@ -348,6 +352,7 @@ def add_document_to_kb(
     source_segments: list[dict] | None = None,
     *,
     refresh_indexes: bool = True,
+    metadata: dict | None = None,
 ) -> str:
     """新增或替换单个文档，返回 ``added`` 或 ``skipped``。
 
@@ -361,8 +366,13 @@ def add_document_to_kb(
         manifest = get_manifest()
         _ensure_manifest_initialized(collection)
         file_id, content_hash = _make_file_ids(file_name, content)
+        governance_metadata = metadata_for_source(file_name)
+        acl_metadata = normalize_acl_metadata(metadata)
+        combined_metadata = {**governance_metadata, **acl_metadata}
         active_source = manifest.get_source(file_name)
-        if active_source and active_source.get("content_hash") == content_hash:
+        if active_source and active_source.get("content_hash") == content_hash and (
+            manifest.get_source_metadata(file_name) or {}
+        ) == combined_metadata:
             logger.info("文件 %s 内容未变，跳过更新", file_name)
             return "skipped"
 
@@ -378,7 +388,6 @@ def add_document_to_kb(
         added_ids: list[str] = []
         chunk_index = 0
         global_parent_index = 0
-        governance_metadata = metadata_for_source(file_name)
 
         def flush_pending_chunks() -> None:
             """将当前小批次向量化并写入 Chroma。"""
@@ -439,7 +448,7 @@ def add_document_to_kb(
                         "parent_text": parent_meta["parent_text"],
                         "chunk_index": chunk_index,
                     }
-                    metadata.update(governance_metadata)
+                    metadata.update(combined_metadata)
                     # 同一父块通常会拆成多个子块；页码/段落匹配只计算一次。
                     metadata.update(chapter_parent_locations[local_parent_id])
                     pending_chunks.append(child)
@@ -468,7 +477,7 @@ def add_document_to_kb(
                 revision_id,
                 content_hash,
                 len(added_ids),
-                metadata=governance_metadata,
+                metadata=combined_metadata,
             )
             active_metas = []
             for metadata in list(staged.get("metadatas") or []):
@@ -584,31 +593,48 @@ def clear_all_documents() -> bool:
         _end_destructive_mutation()
 
 
-def list_documents() -> list[str]:
+def list_documents(access_context: dict | None = None) -> list[str]:
     with _VECTOR_LOCK:
         try:
             collection = get_kb_collection()
             snapshot = _ensure_manifest_initialized(collection)
-            return sorted(snapshot.active_revisions)
+            manifest = get_manifest()
+            return sorted(
+                source for source in snapshot.active_revisions
+                if access_context is None or document_visible_to_user(
+                    manifest.get_source_metadata(source) or metadata_for_source(source),
+                    access_context,
+                )
+            )
         except Exception as exc:
             logger.error("获取文件列表失败: %s", exc, exc_info=True)
             return []
 
 
-def get_doc_count() -> int:
+def get_doc_count(access_context: dict | None = None) -> int:
     """返回向量分块数，适用于“知识块”指标而非真实文件数。"""
     with _VECTOR_LOCK:
         try:
             collection = get_kb_collection()
             snapshot = _ensure_manifest_initialized(collection)
-            return sum(snapshot.chunk_counts.values())
+            if access_context is None:
+                return sum(snapshot.chunk_counts.values())
+            manifest = get_manifest()
+            return sum(
+                count
+                for source, count in snapshot.chunk_counts.items()
+                if document_visible_to_user(
+                    manifest.get_source_metadata(source) or metadata_for_source(source),
+                    access_context,
+                )
+            )
         except Exception:
             return 0
 
 
-def get_document_count() -> int:
+def get_document_count(access_context: dict | None = None) -> int:
     """返回按来源去重后的真实文档数量。"""
-    return len(list_documents())
+    return len(list_documents(access_context))
 
 
 def update_doc_count() -> None:
@@ -645,6 +671,7 @@ def search(
     n_results: int = 10,
     *,
     retrieval_policy: str | None = None,
+    access_context: dict | None = None,
 ):
     with _MUTATION_CONDITION:
         if _batch_update_depth > 0 or _destructive_mutation:
@@ -652,7 +679,7 @@ def search(
         with _VECTOR_LOCK:
             collection = get_kb_collection()
             snapshot = _snapshot_for_read(collection)
-            where = _active_revision_filter(snapshot, policy=retrieval_policy)
+            where = _active_revision_filter(snapshot, policy=retrieval_policy, access_context=access_context)
             if where is None:
                 return {
                     "ids": [[]],
@@ -679,20 +706,22 @@ def hybrid_search_wrapper(
     n_results: int = 50,
     *,
     retrieval_policy: str | None = None,
+    access_context: dict | None = None,
 ):
     if not _use_hybrid:
-        return search(
-            query_text,
-            n_results=n_results,
-            retrieval_policy=retrieval_policy,
-        )
+        search_kwargs = {"n_results": n_results}
+        if retrieval_policy is not None:
+            search_kwargs["retrieval_policy"] = retrieval_policy
+        if access_context is not None:
+            search_kwargs["access_context"] = access_context
+        return search(query_text, **search_kwargs)
     with _MUTATION_CONDITION:
         if _batch_update_depth > 0 or _destructive_mutation:
             raise KnowledgeBaseBusyError("知识库正在更新")
         with _VECTOR_LOCK:
             collection = get_kb_collection()
             snapshot = _snapshot_for_read(collection)
-            where = _active_revision_filter(snapshot, policy=retrieval_policy)
+            where = _active_revision_filter(snapshot, policy=retrieval_policy, access_context=access_context)
             if where is None:
                 return {
                     "ids": [[]],
@@ -702,7 +731,10 @@ def hybrid_search_wrapper(
                     "_kb_generation": snapshot.generation,
                 }
             # 混合检索将关键词匹配与向量语义召回合并，对专有名词更稳健。
-            ensure_bm25(collection, retrieval_policy=retrieval_policy)
+            # BM25 is process-wide derived state. Build it from the complete
+            # governance-visible corpus; the request-specific ACL `where` is
+            # still enforced before BM25 candidates leave storage.
+            ensure_bm25(collection, retrieval_policy="all_active")
             results = hybrid_search(
                 query_text,
                 collection,

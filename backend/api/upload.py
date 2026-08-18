@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from starlette.concurrency import run_in_threadpool
 
 from enterprise_rag.services.document_service import DocumentService
 from enterprise_rag.utils.logger import log_audit_event
 from backend.observability.metrics import mark_kb_busy
+from enterprise_rag.storage.acl import ACLMetadataError, normalize_acl_metadata, user_can_manage_documents
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -28,7 +29,13 @@ class _UploadFileAdapter:
 
 
 @router.post("/upload")
-async def upload(files: list[UploadFile] = File(...)):
+async def upload(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    classification: str | None = Form(default=None),
+    department: str | None = Form(default=None),
+    visibility: str | None = Form(default=None),
+):
     """暂存并提交后台入库任务；返回 task_id 供轮询。"""
     adapted: list[_UploadFileAdapter] = []
     for file in files:
@@ -38,7 +45,21 @@ async def upload(files: list[UploadFile] = File(...)):
         adapted.append(_UploadFileAdapter(file))
     if not adapted:
         raise HTTPException(status_code=400, detail="未收到有效文件内容")
-    result = await run_in_threadpool(DocumentService().process_uploads, adapted)
+    user = getattr(request.state, "current_user", None)
+    if not user_can_manage_documents(user):
+        raise HTTPException(status_code=403, detail="当前账号没有上传文档权限")
+    try:
+        metadata = normalize_acl_metadata(
+            {
+                "classification": classification,
+                "department": department,
+                "visibility": visibility,
+            },
+            owner_id=str((user or {}).get("id") or ""),
+        )
+    except ACLMetadataError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    result = await run_in_threadpool(DocumentService().process_uploads, adapted, metadata)
     if not result.get("success"):
         if result.get("busy"):
             mark_kb_busy("uploading")

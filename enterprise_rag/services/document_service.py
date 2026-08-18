@@ -239,6 +239,7 @@ def _upload_worker(
     file_info_list: list[dict],
     staging_dir: str,
     batch_reserved: bool = False,
+    metadata: dict | None = None,
 ) -> None:
     """执行整批后台管线：并行解析，再串行向量化和写入 Chroma。"""
     task_started = time.perf_counter()
@@ -307,11 +308,16 @@ def _upload_worker(
             )
             file_started = time.perf_counter()
             try:
+                add_kwargs = {
+                    "source_segments": parsed.get("segments", []),
+                    "refresh_indexes": False,
+                }
+                if metadata is not None:
+                    add_kwargs["metadata"] = metadata
                 outcome = add_document_to_kb(
                     parsed["name"],
                     parsed["content"],
-                    source_segments=parsed.get("segments", []),
-                    refresh_indexes=False,
+                    **add_kwargs,
                 )
                 if outcome == "added":
                     added_count += 1
@@ -454,6 +460,7 @@ def _submit_upload_task(
     task_id: str,
     file_info_list: list[dict],
     staging_dir: Path,
+    metadata: dict | None = None,
 ) -> Future:
     future = _UPLOAD_EXECUTOR.submit(
         _upload_worker,
@@ -461,6 +468,7 @@ def _submit_upload_task(
         file_info_list,
         str(staging_dir),
         True,
+        metadata,
     )
     with _UPLOAD_TASKS_LOCK:
         _UPLOAD_FUTURES[task_id] = future
@@ -469,7 +477,7 @@ def _submit_upload_task(
 
 
 class DocumentService:
-    def process_uploads(self, uploaded_files):
+    def process_uploads(self, uploaded_files, metadata: dict | None = None):
         """验证后将整批文件暂存到磁盘，并交给有界后台队列处理。"""
         total_files = list(uploaded_files)
         if not total_files:
@@ -567,7 +575,10 @@ class DocumentService:
                     "message": "已暂存，正在等待后台处理...",
                 },
             )
-            _submit_upload_task(task_id, file_info_list, staging_dir)
+            if metadata is None:
+                _submit_upload_task(task_id, file_info_list, staging_dir)
+            else:
+                _submit_upload_task(task_id, file_info_list, staging_dir, metadata)
             submitted = True
         except Exception as exc:
             cleanup_ok = _cleanup_staging_dir(staging_dir)

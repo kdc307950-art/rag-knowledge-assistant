@@ -155,7 +155,7 @@ class RagService:
             "citation_validation": validate_citations(content, (ref["id"] for ref in refs)),
         }
 
-    def retrieve_only(self, query: str, history: str = "", messages: list | None = None) -> RetrievalDecision:
+    def retrieve_only(self, query: str, history: str = "", messages: list | None = None, access_context: dict | None = None) -> RetrievalDecision:
         """Retrieve once and return the sole RAG decision object without generating."""
         # 只有确认是追问时才改写查询，防止新的独立问题继承上一轮语义。
         use_history = bool(history) and needs_history_rewrite(history, query)
@@ -166,11 +166,13 @@ class RagService:
 
         # 检索阶段与生成阶段解耦：这里无论问题类型都只负责查库和记录分数。
         try:
-            retrieval_result = retrieve_context(
-                retrieval_query,
-                return_raw=True,
-                return_generation=True,
-            )
+            retrieval_kwargs = {
+                "return_raw": True,
+                "return_generation": True,
+            }
+            if access_context is not None:
+                retrieval_kwargs["access_context"] = access_context
+            retrieval_result = retrieve_context(retrieval_query, **retrieval_kwargs)
             # 兼容仍返回三元组的测试替身和旧扩展实现；生产检索器返回第四项代际快照。
             if len(retrieval_result) == 4:
                 context, sources, raw_results, kb_generation = retrieval_result
@@ -441,9 +443,9 @@ class RagService:
             "cache_skipped_generation_changed": not generation_unchanged,
         }
 
-    def answer_stream(self, query: str, history: str, messages: list) -> Iterator[str]:
+    def answer_stream(self, query: str, history: str, messages: list, access_context: dict | None = None) -> Iterator[str]:
         """先检索后裁决：有资料才生成，无资料或检索异常则确定性返回。"""
-        decision = self.retrieve_only(query, history, messages)
+        decision = self.retrieve_only(query, history, messages, access_context=access_context)
         if decision.busy:
             content = "知识库正在更新，请稍后重试。"
             self._last_meta = {
@@ -512,7 +514,7 @@ class RagService:
             thought=meta.get("thought"),
         )
 
-    def draft_stream(self, query: str, retrieval_query: str) -> Iterator[str]:
+    def draft_stream(self, query: str, retrieval_query: str, access_context: dict | None = None) -> Iterator[str]:
         """重新检索原查询，并仅使用当前仍有效的资料生成文稿。"""
         if not DRAFT_ENABLED:
             content = "基于资料起草功能当前未启用。"
@@ -525,7 +527,7 @@ class RagService:
             yield content
             return
         # 起草前重新检索，避免使用已被删除或更新的旧上下文。
-        decision = self.retrieve_only(retrieval_query)
+        decision = self.retrieve_only(retrieval_query, access_context=access_context)
         decision = RetrievalDecision(
             query=query,
             retrieval_query=decision.retrieval_query,

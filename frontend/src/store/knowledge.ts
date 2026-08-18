@@ -7,6 +7,7 @@ import {
   type UploadTask,
   type UploadTaskStatus,
   uploadDocuments,
+  type UploadMetadata,
 } from "../api/knowledge";
 import { ApiError } from "../api/client";
 import { getStats, type KbStats } from "../api/health";
@@ -29,7 +30,7 @@ interface KnowledgeState {
   error: string;
   refreshDocuments: () => Promise<void>;
   resumeUploadTasks: () => Promise<void>;
-  uploadFiles: (files: File[]) => Promise<void>;
+  uploadFiles: (files: File[], metadata?: UploadMetadata) => Promise<void>;
   removeDocument: (source: string) => Promise<void>;
   clearAll: () => Promise<void>;
   clearError: () => void;
@@ -172,10 +173,10 @@ export const useKnowledge = create<KnowledgeState>((set) => ({
       set({ uploading: false });
     }
   },
-  uploadFiles: async (files) => {
+  uploadFiles: async (files, metadata) => {
     set({ uploading: true, error: "" });
     try {
-      const response = await uploadDocuments(files);
+      const response = await uploadDocuments(files, metadata);
       const taskIds = Array.from(
         new Set(
           (response.async_tasks ?? []).concat(response.task_id ? [response.task_id] : []),

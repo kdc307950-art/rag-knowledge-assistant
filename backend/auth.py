@@ -8,7 +8,14 @@ import time
 
 from fastapi import Header, HTTPException, Request
 
-from enterprise_rag.config import APP_PASSWORD
+from enterprise_rag.auth.users import TokenManager, UserStore
+from enterprise_rag.config import (
+    APP_PASSWORD,
+    AUTH_DB_PATH,
+    AUTH_MODE,
+    AUTH_SECRET,
+    AUTH_TOKEN_TTL_SECONDS,
+)
 from enterprise_rag.utils.logger import log_audit_event
 
 from .observability.context import get_request_telemetry
@@ -19,6 +26,40 @@ from .observability.metrics import mark_auth_failure
 AUTH_FAILURE_DEDUPE_SECONDS = 60.0
 _AUTH_FAILURE_LOCK = threading.Lock()
 _AUTH_FAILURE_LAST_LOGGED: dict[tuple[str, str], float] = {}
+_USER_STORE: UserStore | None = None
+_TOKEN_MANAGER: TokenManager | None = None
+
+
+def get_user_store() -> UserStore:
+    global _USER_STORE
+    if _USER_STORE is None:
+        _USER_STORE = UserStore(AUTH_DB_PATH)
+    return _USER_STORE
+
+
+def get_token_manager() -> TokenManager:
+    global _TOKEN_MANAGER
+    if _TOKEN_MANAGER is None:
+        secret = AUTH_SECRET or APP_PASSWORD
+        if not secret:
+            raise RuntimeError("AUTH_SECRET 未配置，不能启用 users 鉴权")
+        _TOKEN_MANAGER = TokenManager(
+            secret=secret,
+            ttl_seconds=AUTH_TOKEN_TTL_SECONDS,
+        )
+    return _TOKEN_MANAGER
+
+
+def _set_auth_state(
+    request: Request,
+    *,
+    user: dict,
+    token: str | None = None,
+    claims: dict | None = None,
+) -> None:
+    request.state.current_user = user
+    request.state.auth_token = token
+    request.state.auth_claims = claims or {}
 
 
 def _route_label(request: Request) -> str:
@@ -64,21 +105,67 @@ def _should_audit_auth_failure(
 async def require_access(
     request: Request,
     x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> None:
-    if not APP_PASSWORD:
-        return
-    if not x_api_key or not hmac.compare_digest(x_api_key, APP_PASSWORD):
-        route = _route_label(request)
-        mark_auth_failure(route)
-        telemetry = get_request_telemetry()
-        client_scope = _client_scope(request)
-        if not _should_audit_auth_failure(client_scope, route):
-            raise HTTPException(status_code=401, detail="访问口令错误")
-        log_audit_event(
-            "auth_failure",
-            route=route,
-            client_scope=client_scope,
-            method=request.method,
-            request_id=telemetry.request_id if telemetry else None,
+    if AUTH_MODE == "users":
+        if authorization and authorization.lower().startswith("bearer "):
+            token = authorization[7:].strip()
+            try:
+                manager = get_token_manager()
+                claims = manager.verify(token, store=get_user_store())
+                user = get_user_store().get_user(int(claims["sub"]))
+            except (RuntimeError, ValueError, KeyError, TypeError):
+                user = None
+                claims = None
+            if user and user.get("active"):
+                _set_auth_state(request, user=user, token=token, claims=claims)
+                return
+        if APP_PASSWORD and x_api_key and hmac.compare_digest(x_api_key, APP_PASSWORD):
+            _set_auth_state(
+                request,
+                user={
+                    "id": "service-admin",
+                    "username": "admin",
+                    "roles": ["admin"],
+                    "department": "general",
+                },
+            )
+            return
+    elif not APP_PASSWORD:
+        _set_auth_state(
+            request,
+            user={
+                "id": "local",
+                "username": "local",
+                "roles": ["admin"],
+                "department": "general",
+            },
         )
-        raise HTTPException(status_code=401, detail="访问口令错误")
+        return
+
+    if AUTH_MODE != "users" and x_api_key and hmac.compare_digest(x_api_key, APP_PASSWORD):
+        _set_auth_state(
+            request,
+            user={
+                "id": "service-admin",
+                "username": "admin",
+                "roles": ["admin"],
+                "department": "general",
+            },
+        )
+        return
+
+    route = _route_label(request)
+    mark_auth_failure(route)
+    telemetry = get_request_telemetry()
+    client_scope = _client_scope(request)
+    if not _should_audit_auth_failure(client_scope, route):
+        raise HTTPException(status_code=401, detail="访问凭据错误")
+    log_audit_event(
+        "auth_failure",
+        route=route,
+        client_scope=client_scope,
+        method=request.method,
+        request_id=telemetry.request_id if telemetry else None,
+    )
+    raise HTTPException(status_code=401, detail="访问凭据错误")

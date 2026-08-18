@@ -22,6 +22,12 @@ class DocumentGovernanceError(RetrievalException):
 
     code = "document_governance_unresolved"
 
+
+class ACLUnavailableError(RetrievalException):
+    """The caller identity required for ACL evaluation is missing or invalid."""
+
+    code = "acl_unavailable"
+
 class DocumentException(RAGException):
     """文档处理异常"""
     def __init__(self, message: str, *, storage_may_have_changed: bool = False):

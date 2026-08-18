@@ -241,7 +241,10 @@ async def chat(
     def iterator_factory():
         if ChatService._is_greeting(req.query):
             return iter([_GREETING_REPLY])
-        return rag.answer_stream(req.query, history, messages)
+        return rag.answer_stream(
+            req.query, history, messages,
+            access_context=getattr(request.state, "current_user", None),
+        )
 
     def on_done():
         if ChatService._is_greeting(req.query):
@@ -295,7 +298,10 @@ async def chat_draft(req: DraftRequest, request: Request) -> StreamingResponse:
     rag = RagService()
 
     producer = _make_producer(
-        lambda: rag.draft_stream(req.query, req.retrieval_query),
+        lambda: rag.draft_stream(
+            req.query, req.retrieval_query,
+            access_context=getattr(request.state, "current_user", None),
+        ),
         lambda: {**_meta_payload(rag), "is_kb": True, "is_draft": True},
     )
     return StreamingResponse(

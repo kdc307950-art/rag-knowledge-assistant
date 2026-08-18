@@ -32,14 +32,25 @@ export interface DocumentsResponse {
   documents: string[];
 }
 
+export interface UploadMetadata {
+  classification: "policy" | "process" | "benefit" | "technical" | "other";
+  department: string;
+  visibility: "all" | "department" | "private";
+}
+
 export function listDocuments() {
   return request<DocumentsResponse>("/kb/documents");
 }
 
-export function uploadDocuments(files: File[]) {
+export function uploadDocuments(files: File[], metadata?: UploadMetadata) {
   const body = new FormData();
   for (const file of files) {
     body.append("files", file, file.name);
+  }
+  if (metadata) {
+    body.set("classification", metadata.classification);
+    body.set("department", metadata.department);
+    body.set("visibility", metadata.visibility);
   }
   return request<UploadResponse>("/upload", { method: "POST", body });
 }
