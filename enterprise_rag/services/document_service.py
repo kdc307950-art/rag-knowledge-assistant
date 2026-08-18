@@ -30,6 +30,7 @@ from ..storage.vector_store import (
     list_documents,
 )
 from ..utils.loader import read_file
+from ..utils.logger import log_audit_event
 
 logger = logging.getLogger(__name__)
 
@@ -388,6 +389,21 @@ def _upload_worker(
             message += f"，失败 {len(fail_list)} 个"
         else:
             message = f"处理失败：{fail_list[-1] if fail_list else '未知错误'}"
+
+        try:
+            from backend.observability.metrics import mark_upload_result
+
+            mark_upload_result(status)
+        except Exception:
+            logger.debug("记录上传指标失败", exc_info=True)
+        log_audit_event(
+            "upload_completed",
+            status=status,
+            file_count=total,
+            added_count=added_count,
+            skipped_count=skipped_count,
+            failed_count=len(fail_list),
+        )
 
         phase_seconds["total"] = time.perf_counter() - task_started
         logger.info(

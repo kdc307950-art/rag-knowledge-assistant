@@ -30,3 +30,5 @@ pure_chroma_probe/
 
 # Local audit/probe scripts
 /_*.py
+_*.py
+.pytest-tmp-*

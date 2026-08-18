@@ -7,7 +7,7 @@ npm install
 npm run dev
 ```
 
-The Vite development server proxies `/api` to the local backend. The current M4 surface includes API-key login, diagnostics, SSE chat with stop, source tracing, explicit chat error states, batch document upload, task polling, document deletion, and knowledge-base clearing.
+The Vite development server proxies `/api` to the local backend. The current frontend includes API-key login, diagnostics, SSE chat with stop, source tracing, explicit chat error states, G2 general answers, knowledge-grounded drafting, debug evidence, batch document upload, task polling, document deletion, and knowledge-base clearing.
 
 ```powershell
 npm run test

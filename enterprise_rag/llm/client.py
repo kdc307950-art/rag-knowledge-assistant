@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import time
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
@@ -57,16 +58,31 @@ def get_llm():
     wait=wait_exponential(multiplier=1, min=1, max=8),
 )
 def _call_llm(messages, stream=False):
+    started = time.perf_counter()
+    mode = "stream" if stream else "request"
     try:
-        return get_llm().chat.completions.create(
+        response = get_llm().chat.completions.create(
             model=LLM_MODEL,
             messages=messages,
             stream=stream,
         )
+        _record_llm(mode, time.perf_counter() - started)
+        return response
     except Exception as exc:
+        _record_llm(mode, time.perf_counter() - started)
         logger.error("LLM 调用失败: %s", exc, exc_info=True)
         # 保留原始 OpenAI 异常类型，供 tenacity 准确判断是否属于可恢复错误。
         raise
+
+
+def _record_llm(mode: str, duration: float) -> None:
+    """Keep the core package usable without importing the FastAPI app eagerly."""
+    try:
+        from backend.observability.metrics import mark_llm_call
+
+        mark_llm_call(mode, duration)
+    except Exception:
+        logger.debug("记录 LLM 指标失败", exc_info=True)
 
 
 def needs_history_rewrite(history: str, question: str) -> bool:

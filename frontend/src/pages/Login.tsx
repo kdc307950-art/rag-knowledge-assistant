@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useAuth } from "../store/auth";
-import { getHealth } from "../api/health";
-import { ApiError } from "../api/client";
+import { verifyLogin } from "./loginFlow";
 
 export default function Login() {
-  const login = useAuth((s) => s.login);
+  const prepareLogin = useAuth((s) => s.prepareLogin);
+  const completeLogin = useAuth((s) => s.completeLogin);
   const logout = useAuth((s) => s.logout);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -15,18 +15,7 @@ export default function Login() {
     setLoading(true);
     setError("");
     try {
-      // 先写入 localStorage（client 才能带上 X-API-Key），再用 health 验证。
-      login(password);
-      await getHealth();
-    } catch (err) {
-      logout();
-      if (err instanceof ApiError && err.status === 401) {
-        setError("访问口令错误");
-      } else if (err instanceof ApiError) {
-        setError("后端错误：" + err.message);
-      } else {
-        setError("无法连接后端服务，请确认已启动 API（uvicorn backend.main:app --port 8000）");
-      }
+      setError(await verifyLogin(password, { prepareLogin, completeLogin, logout }));
     } finally {
       setLoading(false);
     }

@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+import hashlib
 
 from enterprise_rag.storage import vector_store
+from enterprise_rag.utils.logger import log_audit_event
 
 router = APIRouter()
 
@@ -17,6 +19,10 @@ async def list_documents():
 async def delete_document(source: str):
     if not vector_store.delete_document(source):
         raise HTTPException(status_code=404, detail="文档不存在或知识库正在更新")
+    log_audit_event(
+        "document_deleted",
+        source_digest=hashlib.sha256(source.encode("utf-8")).hexdigest()[:12],
+    )
     return {"ok": True}
 
 
@@ -24,6 +30,7 @@ async def delete_document(source: str):
 async def clear_documents():
     if not vector_store.clear_all_documents():
         raise HTTPException(status_code=409, detail="知识库正在更新，请稍后重试")
+    log_audit_event("knowledge_base_cleared")
     return {"ok": True}
 
 

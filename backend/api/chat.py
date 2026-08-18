@@ -20,6 +20,7 @@ from enterprise_rag.services.rag_service import RagService, _general_failure_det
 from ..schemas import ChatRequest, DraftRequest, GeneralRequest
 from ..session import append_message, get_messages, get_or_create_session_id
 from ..sse import sse
+from ..observability.context import mark_sse_terminal
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -111,16 +112,24 @@ def _make_producer(iterator_factory, on_done):
             gen = iterator_factory()
             for chunk in gen:
                 if stop_event.is_set():
+                    mark_sse_terminal("interrupted")
                     break
                 emit("token", chunk)
             if not stop_event.is_set():
                 kind, payload = _terminal_event(on_done())
+                if kind == "done":
+                    mark_sse_terminal("ok")
+                else:
+                    mark_sse_terminal("error", payload.get("code"))
                 emit(kind, payload)
         except Exception as exc:
             if not stop_event.is_set():
                 logger.error("SSE 流式生成失败: %s", exc, exc_info=True)
                 message, code = _general_failure_details(exc)
+                mark_sse_terminal("error", code)
                 emit("error", {"code": code, "message": message, "partial": False})
+            else:
+                mark_sse_terminal("interrupted")
         finally:
             if gen is not None:
                 # 生成器才有 close（触发中断保留逻辑）；list_iterator 等普通迭代器没有。
@@ -173,6 +182,7 @@ async def _run_sse(
         while True:
             if await request.is_disconnected():
                 outcome.terminal = "disconnected"
+                mark_sse_terminal("interrupted")
                 stop_event.set()
                 break
             try:
@@ -183,9 +193,12 @@ async def _run_sse(
                 continue
             if kind == "__end__":
                 outcome.terminal = outcome.terminal or "aborted"
+                if outcome.terminal != "done":
+                    mark_sse_terminal("interrupted")
                 break
             if kind == "error":
                 outcome.terminal = "error"
+                mark_sse_terminal("error", payload.get("code"))
                 yield sse("error", payload)
                 break
             if kind == "token":
@@ -194,12 +207,14 @@ async def _run_sse(
                 yield sse("token", payload)
             elif kind == "done":
                 outcome.terminal = "done"
+                mark_sse_terminal("ok")
                 yield sse("done", payload)
                 break
             else:
                 yield sse(kind, payload)
     except asyncio.CancelledError:
         outcome.terminal = "disconnected"
+        mark_sse_terminal("interrupted")
         raise
     finally:
         stop_event.set()

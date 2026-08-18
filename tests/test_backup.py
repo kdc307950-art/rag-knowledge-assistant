@@ -7,6 +7,7 @@ import sqlite3
 
 import pytest
 
+from scripts import backup as backup_module
 from scripts.backup import BackupError, create_backup, restore_backup, verify_backup
 
 
@@ -128,3 +129,59 @@ def test_restore_preserves_previous_data_as_rollback(tmp_path):
     assert _read_value(current / "kb_manifest.sqlite3") == "backup-value"
     assert rollback is not None
     assert _read_value(rollback / "kb_manifest.sqlite3") == "current-value"
+
+
+def test_restore_cli_opens_runtime_logs_only_after_directory_swap(tmp_path, monkeypatch):
+    data = _runtime_data(tmp_path, value="backup-value")
+    backup = create_backup(
+        data_dir=data,
+        backup_root=tmp_path / "backups",
+        confirm_stopped=True,
+    )
+
+    opened_handles = []
+
+    def fake_setup_logger(*, log_dir, **_kwargs):
+        log_dir.mkdir(parents=True, exist_ok=True)
+        opened_handles.append((log_dir / "held.log").open("a", encoding="utf-8"))
+
+    monkeypatch.setattr(backup_module, "LOG_DIR", data / "logs")
+    monkeypatch.setattr(backup_module, "setup_logger", fake_setup_logger)
+    monkeypatch.setattr(backup_module, "log_audit_event", lambda *args, **kwargs: None)
+
+    try:
+        result = backup_module.main(
+            [
+                "restore",
+                str(backup),
+                "--data-dir",
+                str(data),
+                "--confirm-stopped",
+                "--confirm-replace",
+            ]
+        )
+    finally:
+        for handle in opened_handles:
+            handle.close()
+
+    assert result == 0
+    assert _read_value(data / "kb_manifest.sqlite3") == "backup-value"
+    assert len(opened_handles) == 1
+
+
+def test_replace_with_retry_handles_transient_windows_lock(monkeypatch, tmp_path):
+    from scripts import backup as backup_module
+
+    attempts = {"count": 0}
+
+    class FlakyPath:
+        def replace(self, _target):
+            attempts["count"] += 1
+            if attempts["count"] < 3:
+                raise PermissionError("transient lock")
+
+    monkeypatch.setattr(backup_module, "REPLACE_RETRIES", 3)
+    monkeypatch.setattr(backup_module, "REPLACE_RETRY_DELAY_SECONDS", 0)
+    backup_module._replace_with_retry(FlakyPath(), tmp_path / "target")
+
+    assert attempts["count"] == 3

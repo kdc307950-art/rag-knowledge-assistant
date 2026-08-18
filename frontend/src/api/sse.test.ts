@@ -4,7 +4,7 @@ import {
   ApiError,
   SESSION_ID_STORAGE_KEY,
 } from "./client";
-import { streamChat } from "./sse";
+import { streamChat, streamDraft, streamGeneral } from "./sse";
 import type { ChatDoneMeta, ChatStreamError } from "../types";
 
 function createStorage() {
@@ -177,6 +177,50 @@ describe("streamChat", () => {
       query: "请起草",
       retrieval_query: "请假制度",
     });
+  });
+
+  it("posts an explicit G2 action to the general-answer endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      responseFromBytes('event: done\ndata: {"is_general":true,"is_kb":false}\n\n'),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const received = callbacks();
+
+    await streamGeneral("帮我写通知", {
+      signal: new AbortController().signal,
+      ...received,
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/chat/general");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ query: "帮我写通知" }));
+    expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
+    expect(received.done).toEqual({ is_kb: false, is_general: true });
+  });
+
+  it("posts the canonical retrieval query to the drafting endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      responseFromBytes('event: done\ndata: {"is_draft":true,"is_kb":true}\n\n'),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const received = callbacks();
+
+    await streamDraft("起草请假申请", "请假制度", {
+      signal: new AbortController().signal,
+      ...received,
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/chat/draft");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({
+      query: "起草请假申请",
+      retrieval_query: "请假制度",
+    }));
+    expect(received.done).toEqual({ is_kb: true, is_draft: true });
   });
 
   it("rejects a non-object done payload", async () => {

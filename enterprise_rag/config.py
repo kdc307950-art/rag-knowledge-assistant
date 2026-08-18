@@ -77,6 +77,12 @@ API_KEY = os.getenv(API_KEY_ENV_NAME)
 ENV_SOURCE = _ENV_SOURCES.get(API_KEY_ENV_NAME)
 # 本地开发默认不要求口令；部署到局域网或公网前必须显式配置。
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
+METRICS_TOKEN = os.getenv("METRICS_TOKEN", "")
+ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL", "")
+BACKUP_DIR = Path(os.getenv("RAG_BACKUP_DIR", str(PROJECT_ROOT / "backups"))).expanduser()
+LOG_RETENTION_DAYS = max(1, int(_env_float("LOG_RETENTION_DAYS", 30, minimum=1)))
+ACCESS_LOG_RETENTION_DAYS = max(1, int(_env_float("ACCESS_LOG_RETENTION_DAYS", 7, minimum=1)))
+AUDIT_LOG_RETENTION_DAYS = max(1, int(_env_float("AUDIT_LOG_RETENTION_DAYS", 90, minimum=1)))
 
 if API_KEY:
     logger.info(

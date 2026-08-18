@@ -22,6 +22,15 @@ from ..storage.kb_manifest import KnowledgeBaseManifest, get_manifest
 
 logger = logging.getLogger(__name__)
 
+
+def _record_cache(hit: bool, level: str) -> None:
+    try:
+        from backend.observability.metrics import mark_cache_hit, mark_cache_miss
+
+        (mark_cache_hit if hit else mark_cache_miss)(level)
+    except Exception:
+        logger.debug("记录缓存指标失败", exc_info=True)
+
 # 缓存协议变化时递增版本号，避免同一问题和知识库代际复用旧答案。
 CACHE_SCHEMA_VERSION = "grounded-rag-v6"
 
@@ -102,6 +111,7 @@ class CacheService:
     def get(self, key, *, expected_generation: int | None = None):
         """优先读取进程级 L1 缓存，未命中时回源 SQLite 并回填 L1。"""
         if expected_generation is not None and self.get_generation() != expected_generation:
+            _record_cache(False, "l1")
             return None
         with _l1_lock:
             value = _l1_cache.get(key)
@@ -109,10 +119,14 @@ class CacheService:
                 if expected_generation is not None and self.get_generation() != expected_generation:
                     # L1 已取出后才发现知识库更新，旧答案不能继续留在 L1。
                     _l1_cache.pop(key, None)
+                    _record_cache(False, "l1")
                     return None
                 _l1_cache.pop(key)
                 _l1_cache[key] = value
+                _record_cache(True, "l1")
                 return value
+
+        _record_cache(False, "l1")
 
         value = self.persistent_cache.get(key)
         if value is not None:
@@ -121,6 +135,9 @@ class CacheService:
             with _l1_lock:
                 _l1_cache[key] = value
                 self._trim_session_cache(_l1_cache)
+            _record_cache(True, "l2")
+        else:
+            _record_cache(False, "l2")
         return value
 
     def set(self, key, value, *, expected_generation: int | None = None) -> bool:

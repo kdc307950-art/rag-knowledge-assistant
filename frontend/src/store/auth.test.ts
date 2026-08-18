@@ -43,4 +43,16 @@ describe("auth store", () => {
     expect(localStorage.getItem("apiKey")).toBeNull();
     expect(localStorage.getItem("localAuth")).toBeNull();
   });
+
+  it("keeps the login screen active while a credential is being verified", async () => {
+    const { useAuth } = await import("./auth");
+    useAuth.getState().prepareLogin(" pending-key ");
+
+    expect(useAuth.getState().apiKey).toBe("pending-key");
+    expect(useAuth.getState().isAuthenticated).toBe(false);
+    expect(localStorage.getItem("apiKey")).toBe("pending-key");
+
+    useAuth.getState().completeLogin();
+    expect(useAuth.getState().isAuthenticated).toBe(true);
+  });
 });

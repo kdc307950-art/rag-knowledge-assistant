@@ -16,6 +16,7 @@ from pathlib import Path
 import shutil
 import sqlite3
 import sys
+import time
 from typing import Iterable
 from uuid import uuid4
 
@@ -24,17 +25,21 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from enterprise_rag.config import RUNTIME_DATA_DIR  # noqa: E402
+from enterprise_rag.config import BACKUP_DIR, LOG_DIR, RUNTIME_DATA_DIR  # noqa: E402
+from enterprise_rag.utils.logger import log_audit_event, setup_logger  # noqa: E402
 
 
 FORMAT_VERSION = 1
 MANIFEST_NAME = "backup_manifest.json"
+VERIFICATION_LEDGER_NAME = "verification_ledger.jsonl"
 REQUIRED_ENTRIES = ("kb_data", "kb_manifest.sqlite3")
 SQLITE_PATHS = (
     "kb_manifest.sqlite3",
     "answer_cache.sqlite3",
     "kb_data/chroma.sqlite3",
 )
+REPLACE_RETRIES = 8
+REPLACE_RETRY_DELAY_SECONDS = 0.25
 
 
 class BackupError(RuntimeError):
@@ -86,6 +91,22 @@ def _check_required(data_dir: Path) -> None:
         raise BackupError("Missing required runtime data: " + ", ".join(missing))
 
 
+def _replace_with_retry(source: Path, target: Path) -> None:
+    """Replace a directory while tolerating short Windows scanner locks."""
+
+    last_error: OSError | None = None
+    for attempt in range(REPLACE_RETRIES):
+        try:
+            source.replace(target)
+            return
+        except OSError as exc:
+            last_error = exc
+            if attempt + 1 < REPLACE_RETRIES:
+                time.sleep(REPLACE_RETRY_DELAY_SECONDS)
+    assert last_error is not None
+    raise last_error
+
+
 def _check_sqlite_files(data_dir: Path) -> dict[str, str]:
     results: dict[str, str] = {}
     for relative in SQLITE_PATHS:
@@ -128,6 +149,39 @@ def _append_log(backup_root: Path, payload: dict) -> None:
     backup_root.mkdir(parents=True, exist_ok=True)
     with (backup_root / "backup.log").open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+
+def _record_verification(backup_dir: Path, result: dict[str, object], reason: str) -> None:
+    """Record a successful hash/SQLite verification for external health checks."""
+    root = backup_dir.parent
+    _append_log(
+        root,
+        {
+            "timestamp": _utc_now().isoformat(),
+            "action": "verify",
+            "reason": reason,
+            "backup": backup_dir.name,
+            "file_count": result.get("file_count"),
+            "total_bytes": result.get("total_bytes"),
+        },
+    )
+    # Keep a separate, append-only ledger so backup.log can remain a human-
+    # readable activity log while health checks only parse verification facts.
+    ledger = root / VERIFICATION_LEDGER_NAME
+    with ledger.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "timestamp": _utc_now().isoformat(),
+                    "backup": backup_dir.name,
+                    "ok": True,
+                    "reason": reason,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
 
 
 def _next_backup_name(backup_root: Path, now: datetime) -> str:
@@ -208,6 +262,14 @@ def create_backup(
         raise
 
     removed = _remove_old_backups(backup_root, keep)
+    _record_verification(
+        destination,
+        {
+            "file_count": len(files),
+            "total_bytes": payload["total_bytes"],
+        },
+        "create",
+    )
     _append_log(
         backup_root,
         {
@@ -269,12 +331,14 @@ def verify_backup(backup_dir: Path) -> dict[str, object]:
             raise BackupError(f"SHA-256 mismatch: {relative}")
 
     sqlite_checks = _check_sqlite_files(data_dir)
-    return {
+    result = {
         "ok": True,
         "file_count": len(actual_paths),
         "total_bytes": sum(path.stat().st_size for path in actual_paths.values()),
         "sqlite_checks": sqlite_checks,
     }
+    _record_verification(backup_dir, result, "verify")
+    return result
 
 
 def restore_backup(
@@ -305,13 +369,13 @@ def restore_backup(
             rollback = data_dir.parent / f"{data_dir.name}.pre-restore-{stamp}"
             if rollback.exists():
                 raise BackupError(f"Rollback directory already exists: {rollback}")
-            data_dir.replace(rollback)
-        stage.replace(data_dir)
+            _replace_with_retry(data_dir, rollback)
+        _replace_with_retry(stage, data_dir)
     except Exception:
         if stage.exists() and _inside(stage, data_dir.parent):
             shutil.rmtree(stage, ignore_errors=True)
         if rollback is not None and rollback.exists() and not data_dir.exists():
-            rollback.replace(data_dir)
+            _replace_with_retry(rollback, data_dir)
         raise
     return rollback
 
@@ -322,7 +386,7 @@ def _parser() -> argparse.ArgumentParser:
 
     create = subparsers.add_parser("create", help="create and verify an offline backup")
     create.add_argument("--data-dir", type=Path, default=RUNTIME_DATA_DIR)
-    create.add_argument("--backup-dir", type=Path, default=PROJECT_ROOT / "backups")
+    create.add_argument("--backup-dir", type=Path, default=BACKUP_DIR)
     create.add_argument("--keep", type=int, default=7)
     create.add_argument("--confirm-stopped", action="store_true")
 
@@ -339,6 +403,11 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Iterable[str] | None = None) -> int:
     args = _parser().parse_args(list(argv) if argv is not None else None)
+    # ``LOG_DIR`` normally lives under ``RUNTIME_DATA_DIR``.  Do not open
+    # those files before restore_backup renames the data directory on Windows;
+    # an open handle makes the directory move fail with WinError 5.
+    if args.command != "restore":
+        setup_logger(log_dir=LOG_DIR)
     try:
         if args.command == "create":
             path = create_backup(
@@ -347,9 +416,11 @@ def main(argv: Iterable[str] | None = None) -> int:
                 keep=args.keep,
                 confirm_stopped=args.confirm_stopped,
             )
+            log_audit_event("backup_created", backup=path.name)
             print(f"Backup created: {path}")
         elif args.command == "verify":
             result = verify_backup(args.backup)
+            log_audit_event("backup_verified", backup=args.backup.name)
             print(json.dumps(result, ensure_ascii=False))
         else:
             rollback = restore_backup(
@@ -358,6 +429,10 @@ def main(argv: Iterable[str] | None = None) -> int:
                 confirm_stopped=args.confirm_stopped,
                 confirm_replace=args.confirm_replace,
             )
+            # Re-open logging only after the restored data directory is in
+            # place, then record the successful restore in the new log tree.
+            setup_logger(log_dir=LOG_DIR)
+            log_audit_event("backup_restored", backup=args.backup.name)
             print(f"Restore completed; rollback copy: {rollback or 'none'}")
     except (BackupError, OSError) as exc:
         print(f"Backup error: {exc}", file=sys.stderr)

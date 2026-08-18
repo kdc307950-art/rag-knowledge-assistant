@@ -113,11 +113,22 @@ def build_diagnostics() -> dict[str, Any]:
         snapshot = get_manifest().snapshot()
         generation = snapshot.generation
         declared_chunks = sum(snapshot.chunk_counts.values())
-        manifest_ok = bool(
+        empty_store_ok = (
             vector_healthy
-            and snapshot.initialized
-            and len(snapshot.active_revisions) == doc_count
-            and declared_chunks == chunk_count
+            and not snapshot.initialized
+            and not snapshot.active_revisions
+            and declared_chunks == 0
+            and doc_count == 0
+            and chunk_count == 0
+        )
+        manifest_ok = bool(
+            empty_store_ok
+            or (
+                vector_healthy
+                and snapshot.initialized
+                and len(snapshot.active_revisions) == doc_count
+                and declared_chunks == chunk_count
+            )
         )
         manifest_check = {
             "ok": manifest_ok,

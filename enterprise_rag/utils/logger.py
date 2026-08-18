@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import sys
 import threading
+import time
 from typing import Any
 
 
@@ -62,6 +63,19 @@ def _redact(value: str) -> str:
     return re.sub(r"(?i)sk[-_][a-z0-9_\-.]{8,}", "***REDACTED***", text)
 
 
+def _redact_payload(value: Any) -> Any:
+    """Redact nested event values without flattening structured fields."""
+    if isinstance(value, str):
+        return _redact(value)
+    if isinstance(value, dict):
+        return {str(key): _redact_payload(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_payload(item) for item in value]
+    return value
+
+
 class _JsonFormatter(logging.Formatter):
     """将运行日志输出为一行 JSON，便于后续检索和集中采集。"""
 
@@ -75,6 +89,20 @@ class _JsonFormatter(logging.Formatter):
             "function": record.funcName,
             "line": record.lineno,
         }
+        # Request-scoped logs (including errors emitted by the worker thread
+        # that backs SSE) share the middleware's server-owned correlation ID.
+        # Import lazily to avoid a module cycle during application startup.
+        try:
+            from backend.observability.context import get_request_telemetry
+
+            telemetry = get_request_telemetry()
+            if telemetry is not None:
+                payload["request_id"] = telemetry.request_id
+        except Exception:
+            pass
+        structured = getattr(record, "structured_payload", None)
+        if isinstance(structured, dict):
+            payload.update({str(key): _redact_payload(value) for key, value in structured.items()})
         if record.exc_info:
             payload["exception"] = _redact(self.formatException(record.exc_info))
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -140,6 +168,83 @@ def _install_exception_hooks() -> None:
     threading.excepthook = log_thread_exception
 
 
+def _event_logger(name: str) -> logging.Logger:
+    logger = logging.getLogger(f"{PACKAGE_LOGGER_NAME}.{name}")
+    logger.propagate = False
+    return logger
+
+
+def log_access_event(**payload: Any) -> None:
+    """Write a redacted request summary to the dedicated access log."""
+    _event_logger("access").info(
+        "request",
+        extra={"structured_payload": {"event": "request", **payload}},
+    )
+
+
+def log_audit_event(event: str, **payload: Any) -> None:
+    """Write a security or data-mutation event to the dedicated audit log."""
+    _event_logger("audit").info(
+        event,
+        extra={"structured_payload": {"event": event, **payload}},
+    )
+
+
+def _attach_event_handler(
+    logger_name: str,
+    file_name: str,
+    directory: Path,
+    formatter: logging.Formatter,
+    max_bytes: int,
+    backup_count: int,
+) -> None:
+    logger = _event_logger(logger_name)
+    handler_name = f"{_MANAGED_HANDLER_PREFIX}{logger_name}"
+    if any(handler.get_name() == handler_name for handler in logger.handlers):
+        return
+    handler = RotatingFileHandler(
+        directory / file_name,
+        maxBytes=max(1024, int(max_bytes)),
+        backupCount=max(1, int(backup_count)),
+        encoding="utf-8",
+    )
+    handler.set_name(handler_name)
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+
+def _cleanup_old_log_files(directory: Path) -> None:
+    """Apply time-based retention in addition to size-based rotation."""
+    try:
+        from enterprise_rag.config import (
+            ACCESS_LOG_RETENTION_DAYS,
+            AUDIT_LOG_RETENTION_DAYS,
+            LOG_RETENTION_DAYS,
+        )
+    except Exception:
+        return
+    policies = {
+        "app.log": LOG_RETENTION_DAYS,
+        "error.log": LOG_RETENTION_DAYS,
+        "access.log": ACCESS_LOG_RETENTION_DAYS,
+        "audit.log": AUDIT_LOG_RETENTION_DAYS,
+    }
+    now = time.time()
+    for prefix, days in policies.items():
+        for path in directory.glob(prefix + "*"):
+            # Never unlink the active file. POSIX allows deleting an open log,
+            # which would leave the handler writing to an invisible inode.
+            # Retention applies only to rotated files such as app.log.1.
+            if path.name == prefix:
+                continue
+            try:
+                if now - path.stat().st_mtime > max(1, int(days)) * 86400:
+                    path.unlink()
+            except OSError:
+                continue
+
+
 def setup_logger(
     *,
     log_dir: Path | str | None = None,
@@ -155,15 +260,17 @@ def setup_logger(
     directory = Path(log_dir or os.getenv("RAG_LOG_DIR", "logs")).expanduser()
 
     if reset:
-        for handler in list(package_logger.handlers):
-            if handler.get_name().startswith(_MANAGED_HANDLER_PREFIX):
-                package_logger.removeHandler(handler)
-                handler.close()
+        for logger_name in (PACKAGE_LOGGER_NAME, f"{PACKAGE_LOGGER_NAME}.access", f"{PACKAGE_LOGGER_NAME}.audit"):
+            target = logging.getLogger(logger_name)
+            for handler in list(target.handlers):
+                if (handler.get_name() or "").startswith(_MANAGED_HANDLER_PREFIX):
+                    target.removeHandler(handler)
+                    handler.close()
 
-    if not any(handler.get_name() == f"{_MANAGED_HANDLER_PREFIX}app" for handler in package_logger.handlers):
-        try:
-            directory.mkdir(parents=True, exist_ok=True)
-            formatter = _JsonFormatter()
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        formatter = _JsonFormatter()
+        if not any(handler.get_name() == f"{_MANAGED_HANDLER_PREFIX}app" for handler in package_logger.handlers):
             app_handler = RotatingFileHandler(
                 directory / "app.log", maxBytes=max(1024, int(max_bytes)),
                 backupCount=max(1, int(backup_count)), encoding="utf-8",
@@ -171,6 +278,8 @@ def setup_logger(
             app_handler.set_name(f"{_MANAGED_HANDLER_PREFIX}app")
             app_handler.setLevel(logging.INFO)
             app_handler.setFormatter(formatter)
+            package_logger.addHandler(app_handler)
+        if not any(handler.get_name() == f"{_MANAGED_HANDLER_PREFIX}error" for handler in package_logger.handlers):
             error_handler = RotatingFileHandler(
                 directory / "error.log", maxBytes=max(1024, int(max_bytes)),
                 backupCount=max(1, int(backup_count)), encoding="utf-8",
@@ -178,11 +287,16 @@ def setup_logger(
             error_handler.set_name(f"{_MANAGED_HANDLER_PREFIX}error")
             error_handler.setLevel(logging.ERROR)
             error_handler.setFormatter(formatter)
-            package_logger.addHandler(app_handler)
             package_logger.addHandler(error_handler)
-            _seed_historical_incidents(directory)
-        except OSError as exc:
-            logging.getLogger().warning("日志目录不可用，已退回控制台日志: %s", exc)
+        # Repair dedicated event handlers independently from the main logger.
+        # Hot reloads and partial test reconfiguration can otherwise disable
+        # access/audit logging without an explicit error.
+        _attach_event_handler("access", "access.log", directory, formatter, max_bytes, backup_count)
+        _attach_event_handler("audit", "audit.log", directory, formatter, max_bytes, backup_count)
+        _cleanup_old_log_files(directory)
+        _seed_historical_incidents(directory)
+    except OSError as exc:
+        logging.getLogger().warning("日志目录不可用，已退回控制台日志: %s", exc)
 
     package_logger.setLevel(resolved_level)
     package_logger.propagate = True

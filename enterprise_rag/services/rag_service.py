@@ -16,6 +16,14 @@ from ..llm.prompts import DRAFT_SYSTEM_PROMPT, SYSTEM_PROMPT_TEMPLATE
 from ..llm.schema import AIResponse
 from .cache_service import CacheService
 
+try:
+    from backend.observability.context import timed_stage
+except Exception:  # pragma: no cover - standalone core imports
+    from contextlib import nullcontext
+
+    def timed_stage(_name):
+        return nullcontext()
+
 logger = logging.getLogger(__name__)
 
 
@@ -259,16 +267,17 @@ class RagService:
         try:
             # 系统提示词只注入本次检索到的资料，保证回答不能脱离知识库扩写。
             system_prompt = template.format(context=decision.context)
-            for chunk in generate_answer_stream(
-                system_prompt,
-                self._generation_messages(decision.retrieval_query),
-            ):
-                if not isinstance(chunk, str) or not chunk:
-                    continue
-                if not full_response and not chunk.strip():
-                    continue
-                full_response += chunk
-                yield chunk
+            with timed_stage("llm"):
+                for chunk in generate_answer_stream(
+                    system_prompt,
+                    self._generation_messages(decision.retrieval_query),
+                ):
+                    if not isinstance(chunk, str) or not chunk:
+                        continue
+                    if not full_response and not chunk.strip():
+                        continue
+                    full_response += chunk
+                    yield chunk
         except Exception as exc:
             logger.exception("严格知识库回答生成失败")
             # 已流出的内容无法从浏览器撤回。保留同一份中断内容到会话元数据，

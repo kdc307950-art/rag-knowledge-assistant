@@ -11,6 +11,14 @@ from enterprise_rag.core.exceptions import KnowledgeBaseBusyError, RetrievalExce
 from .reranker import get_reranker
 import logging
 
+try:
+    from backend.observability.context import timed_stage
+except Exception:  # pragma: no cover - core package can run without the API
+    from contextlib import nullcontext
+
+    def timed_stage(_name):
+        return nullcontext()
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,8 +43,9 @@ def retrieve_context(
         top_k = FINAL_TOP_K
 
     try:
-        search_func = get_search_function()
-        results = search_func(query, n_results=n_results)
+        with timed_stage("retrieval"):
+            search_func = get_search_function()
+            results = search_func(query, n_results=n_results)
         kb_generation = results.get("_kb_generation")
         documents = results.get("documents") or []
         metadatas = results.get("metadatas") or []
@@ -65,13 +74,15 @@ def retrieve_context(
         return "", []
 
     # 交叉编码器精排比向量距离更适合决定是否将片段交给模型回答。
-    reranker = get_reranker()
+    # 将模型加载和 predict 一起计入 rerank，便于区分 retrieval 与重排瓶颈。
     pairs = [[query, doc] for doc in docs]
-    try:
-        scores = reranker.predict(pairs, batch_size=RERANK_BATCH_SIZE)
-    except TypeError:
-        # 兼容不接受 batch_size 的旧重排器实现和轻量测试替身。
-        scores = reranker.predict(pairs)
+    with timed_stage("rerank"):
+        reranker = get_reranker()
+        try:
+            scores = reranker.predict(pairs, batch_size=RERANK_BATCH_SIZE)
+        except TypeError:
+            # 兼容不接受 batch_size 的旧重排器实现和轻量测试替身。
+            scores = reranker.predict(pairs)
 
     scored_items = list(zip(docs, metas, distances, scores))
     scored_items.sort(key=lambda x: x[3], reverse=True)

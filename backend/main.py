@@ -13,10 +13,13 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 
+from enterprise_rag.config import LOG_BACKUP_COUNT, LOG_DIR, LOG_LEVEL, LOG_MAX_BYTES
 from enterprise_rag.services.diagnostics_service import build_diagnostics
+from enterprise_rag.utils.logger import setup_logger
 
-from .api import chat, diagnostics, kb, upload
+from .api import chat, diagnostics, kb, metrics, probes, upload
 from .auth import require_access
+from .observability.middleware import ObservabilityMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +30,11 @@ async def _log_startup_diagnostics() -> None:
         checks = report["checks"]
         logger.info(
             "[自检] vector=%s manifest=%s embedding=%s reranker=%s llm=%s",
-            checks["vector_store"]["status"],
-            checks["manifest"]["status"],
-            checks["embedding"]["state"],
-            checks["reranker"]["state"],
-            checks["llm"]["state"],
+            checks.get("vector_store", {}).get("status", "unknown"),
+            checks.get("manifest", {}).get("status", "unknown"),
+            checks.get("embedding", {}).get("state", "unknown"),
+            checks.get("reranker", {}).get("state", "unknown"),
+            checks.get("llm", {}).get("state", "unknown"),
         )
     except Exception:
         logger.exception("启动自检失败")
@@ -39,6 +42,15 @@ async def _log_startup_diagnostics() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Uvicorn's default logger only writes to its own handlers. Install the
+    # project JSON handlers before startup diagnostics and request handling so
+    # access/error/audit extensions can rely on a configured package logger.
+    setup_logger(
+        log_dir=LOG_DIR,
+        level=LOG_LEVEL,
+        max_bytes=LOG_MAX_BYTES,
+        backup_count=LOG_BACKUP_COUNT,
+    )
     task = asyncio.create_task(_log_startup_diagnostics())
     app.state.startup_diagnostics_task = task
     try:
@@ -57,10 +69,16 @@ app.add_middleware(
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Session-Id"],
+    expose_headers=["X-Session-Id", "X-Request-Id"],
 )
+app.add_middleware(ObservabilityMiddleware)
 
 api_dependencies = [Depends(require_access)]
+# Probes and metrics deliberately sit outside the application API dependency:
+# /api/live and /api/ready are consumed by an external watchdog, while
+# /metrics has its own METRICS_TOKEN/loopback policy.
+app.include_router(probes.router, prefix="/api")
+app.include_router(metrics.router)
 app.include_router(chat.router, prefix="/api", dependencies=api_dependencies)
 app.include_router(upload.router, prefix="/api", dependencies=api_dependencies)
 app.include_router(kb.router, prefix="/api", dependencies=api_dependencies)

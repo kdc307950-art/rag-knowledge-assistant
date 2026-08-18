@@ -7,6 +7,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from starlette.concurrency import run_in_threadpool
 
 from enterprise_rag.services.document_service import DocumentService
+from enterprise_rag.utils.logger import log_audit_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -38,11 +39,23 @@ async def upload(files: list[UploadFile] = File(...)):
         raise HTTPException(status_code=400, detail="未收到有效文件内容")
     result = await run_in_threadpool(DocumentService().process_uploads, adapted)
     if not result.get("success"):
+        log_audit_event(
+            "upload_rejected",
+            file_count=len(adapted),
+            total_bytes=sum(int(file.size or 0) for file in adapted),
+            reason="busy" if result.get("busy") else "validation",
+        )
         raise HTTPException(
             status_code=429 if result.get("busy") else 400,
             detail=result.get("error", "上传失败"),
         )
     task_ids = result.get("async_tasks") or []
+    log_audit_event(
+        "upload_queued",
+        file_count=len(adapted),
+        total_bytes=sum(int(file.size or 0) for file in adapted),
+        task_count=len(task_ids),
+    )
     return {"success": True, "task_id": task_ids[0] if task_ids else None, **result}
 
 

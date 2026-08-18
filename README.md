@@ -192,11 +192,18 @@ data/                     所有运行数据的默认根目录
 | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | 重排模型 |
 | `HF_HUB_OFFLINE` | `0` | `1` 时禁止在线下载 Hugging Face 模型 |
 | `APP_PASSWORD` | 空 | 可选的本地应用访问口令 |
+| `METRICS_TOKEN` | 空 | `/metrics` 的独立访问令牌；未设置时仅允许 loopback |
+| `ALERT_WEBHOOK_URL` | 空 | 外部健康检查的尽力而为 webhook，不写入日志 |
 | `RAG_DATA_DIR` | `<项目根>/data` | 统一迁移缓存、Chroma 与 manifest 的运行数据根目录 |
 | `RAG_LOG_DIR` | `<RAG_DATA_DIR>/logs` | 运行日志目录；适合部署时挂载到独立持久化卷 |
+| `RAG_BACKUP_DIR` | `<项目根>/backups` | 离线备份和验证台账目录 |
 | `LOG_LEVEL` | `INFO` | 日志最小等级，例如 `DEBUG`、`INFO`、`WARNING` |
 | `LOG_MAX_BYTES` | `5242880` | 单个日志文件滚动前的最大字节数，默认 5MB |
 | `LOG_BACKUP_COUNT` | `7` | 每类日志保留的滚动备份数量 |
+| `LOG_RETENTION_DAYS` | `30` | app/error 日志按时间清理的天数 |
+| `ACCESS_LOG_RETENTION_DAYS` | `7` | access.log 按时间清理的天数 |
+| `AUDIT_LOG_RETENTION_DAYS` | `90` | audit.log 按时间清理的天数 |
+| `HEALTH_AUTH_FAILURE_MIN` | `2` | 最近健康检查窗口内触发模型鉴权告警所需的最少失败次数 |
 | `CACHE_SALT` | 空 | 回答缓存键的可选 HMAC 盐值 |
 | `INITIAL_RETRIEVAL_K` | `50` | 初始候选数量 |
 | `FINAL_TOP_K` | `8` | 最终上下文片段数量 |
@@ -224,6 +231,9 @@ data/                     所有运行数据的默认根目录
 - `data/answer_cache.sqlite3`：持久化回答缓存。删除只会清空缓存，不会删除知识库。
 - `data/logs/app.log`：JSON Lines 格式的运行日志，记录 INFO 及以上事件。
 - `data/logs/error.log`：JSON Lines 格式的错误日志，记录 ERROR 和 CRITICAL 事件；每一行均可单独解析。
+- `data/logs/access.log`：模板路由、状态、耗时、SSE 业务终态和阶段耗时；不记录查询原文、session 或 query string。
+- `data/logs/audit.log`：上传、删除、清空、备份和鉴权失败事件；不记录口令、API Key 或原始文件名。
+- `data/logs/alerts.log`：外部健康检查的告警/恢复事件；`alerts_state.json` 保存冷却状态。
 - `data/logs/incident_history.jsonl`：已复盘的高价值事故台账，不会把每一次瞬时错误都登记为事故。
 - 日志会自动脱敏已配置的 API Key 和 Bearer Token；业务日志只记录问题长度、结果数量等诊断字段，不记录完整用户提问或文档正文。排障时优先查看 `error.log`，不要把日志中的来源文件名、路径或堆栈直接外发。
 - 主线程和后台上传线程的未捕获异常会自动写入 `error.log`；已捕获的业务异常应使用模块级 `logger.exception(...)` 或 `logger.error(...)` 记录，页面只展示面向用户的简短提示。
@@ -287,6 +297,25 @@ FastAPI 启动后会在后台执行一次不阻塞服务启动的轻量自检。
 - LLM：只检查本地 Key 与模型配置，`network_verified=false`，不会产生模型调用费用；
 - 错误摘要：读取 `error.log` 尾部，返回最近 24 小时计数和最多 3 条二次脱敏摘要。
 
+### 可观测性与外部检查
+
+- `GET /api/live`：不鉴权的进程存活探针。
+- `GET /api/ready`：不鉴权的依赖就绪探针；离线模式下模型不可用、依赖异常或 manifest 不一致返回 `503`，在线模式允许首次使用时下载模型，空知识库仍是合法就绪状态。
+- `GET /metrics`：Prometheus 文本格式；使用独立 `METRICS_TOKEN` 或仅允许 loopback。指标包括 HTTP/SSE 终态、首 token 延迟、LLM 调用、L1/L2 缓存、上传终态、鉴权失败和知识库快照。
+- `rag_llm_calls_total` 按 SDK 实际调用 attempt 计数；临时网络/限流重试会产生多个 attempt，不等同于用户逻辑请求数。
+- 每个响应带服务端生成的 `X-Request-Id`。SSE 的 HTTP 状态通常为 `200`，业务错误必须看 `error`/`interrupted` 终态；当前无法可靠区分用户主动停止和网络断开。
+- 请求上下文内的 `app.log`/`error.log` 会写入同一 `request_id`；健康检查按请求去重模型鉴权失败链路，避免一次失败的多层包装触发假告警。
+- 备份验证会追加 `backups/verification_ledger.jsonl`。外部检查从进程外运行，避免应用进程挂掉时“告警线程也一起消失”：
+- 外部检查还会在最近窗口内检测持续模型鉴权或配额失败；同一“来源类别 + 路由”的口令失败审计在 60 秒内合并，指标仍计数每一次失败。
+- 反向代理不要公开 `/api/live`、`/api/ready`；如需代理 `/metrics`，必须设置 `METRICS_TOKEN`。代理到本机时后端看到的是 loopback，不能依赖“仅本机”规则代替令牌。
+- Windows 任务计划是“同机、进程外”检查，仅在当前交互用户环境中运行；它不能报告整机断电、网络全断或任务计划自身停止，这类主机级可用性需要远端探测。
+
+```powershell
+uv run python scripts/health_check.py
+```
+
+详细边界、SLO、保留期和恢复责任见 [`docs/ops-contract.md`](docs/ops-contract.md)。
+
 ### 部署边界
 
 - 若改为局域网或公网地址，至少应配置 `APP_PASSWORD`，并在反向代理层启用 HTTPS。
@@ -336,7 +365,7 @@ Get-Content "$env:RAG_DATA_DIR\logs\error.log" -Tail 50
 - DashScope 专用 Key 与通用 OpenAI 兼容 Key 的选择规则
 - 在线、离线缓存、本地模型目录和缺失模型的就绪检测
 
-当前完整测试基线：`163 passed`。
+测试基线以当前机器实际执行的 `uv run pytest tests -q` 输出为准；不要手工复制旧的通过数。交付记录应写入本轮实测结果。warning 若仍出现，来自 FastAPI/Starlette 与 httpx 的兼容提示。
 
 其中包含真实临时 Chroma + SQLite manifest 的一致性测试：未提交 staging 不可见、完整/残缺 staging 重试、旧版本清理失败隔离、manifest 代际传播、上传期间向量/混合查询熔断、BM25 最终候选二次可见性过滤，以及缓存 L1/L2 命中和写入期间代际变化时 fail closed。
 
