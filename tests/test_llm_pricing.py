@@ -167,3 +167,9 @@ def test_empty_future_or_mixed_currency_tables_do_not_invent_a_cost(tmp_path):
     )
     assert result.amount is None
     assert result.confidence == "unknown"
+
+
+def test_provider_detection_recognizes_deepseek_openai_endpoint():
+    from enterprise_rag.llm.pricing import provider_from_base_url
+
+    assert provider_from_base_url("https://api.deepseek.com") == "deepseek"

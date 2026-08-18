@@ -68,6 +68,18 @@ def test_dashscope_uses_provider_specific_key_before_generic_openai_key(monkeypa
     assert config.API_KEY_ENV_NAME == "DASHSCOPE_API_KEY"
 
 
+def test_deepseek_uses_provider_specific_key_before_generic_openai_key(monkeypatch):
+    config = _load_config_copy(
+        monkeypatch,
+        OPENAI_BASE_URL="https://api.deepseek.com",
+        OPENAI_API_KEY="generic-key",
+        DEEPSEEK_API_KEY="deepseek-key",
+    )
+
+    assert config.API_KEY == "deepseek-key"
+    assert config.API_KEY_ENV_NAME == "DEEPSEEK_API_KEY"
+
+
 def test_non_dashscope_endpoint_keeps_generic_openai_key(monkeypatch):
     """非 DashScope 兼容接口仍沿用 OPENAI_API_KEY。"""
     config = _load_config_copy(

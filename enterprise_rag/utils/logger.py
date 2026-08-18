@@ -55,7 +55,7 @@ _HISTORICAL_INCIDENTS = (
 def _redact(value: str) -> str:
     """移除日志中可能出现的密钥和值较长的 Bearer Token。"""
     text = str(value)
-    for name in ("DASHSCOPE_API_KEY", "OPENAI_API_KEY"):
+    for name in ("DASHSCOPE_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY"):
         secret = os.getenv(name)
         if secret:
             text = text.replace(secret, "***REDACTED***")

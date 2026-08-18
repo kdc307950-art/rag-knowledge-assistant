@@ -37,6 +37,8 @@ def provider_from_base_url(base_url: str = BASE_URL) -> str:
     host = (urlparse(base_url).hostname or "").lower()
     if "dashscope.aliyuncs.com" in host:
         return "dashscope"
+    if "api.deepseek.com" in host:
+        return "deepseek"
     if "openai.com" in host:
         return "openai"
     return host or "unknown"

@@ -34,7 +34,7 @@ uv sync --group dev
 
 ### 配置模型接口
 
-默认使用 DashScope 时，在项目根目录创建 `.env` 文件：
+使用 DashScope 时，在项目根目录创建 `.env` 文件：
 
 ```env
 DASHSCOPE_API_KEY=your-dashscope-api-key
@@ -50,7 +50,17 @@ OPENAI_BASE_URL=https://your-openai-compatible-endpoint/v1
 OPENAI_MODEL=your-model-name
 ```
 
-未设置 `OPENAI_BASE_URL` 和 `OPENAI_MODEL` 时，系统使用 `enterprise_rag/config.py` 中的默认值。连接 DashScope 时优先读取 `DASHSCOPE_API_KEY`，避免误用操作系统中为其他服务配置的 `OPENAI_API_KEY`；未提供专用变量时仍兼容原有 `OPENAI_API_KEY`。
+连接 DeepSeek OpenAI 格式接口时使用独立 Key：
+
+```env
+DEEPSEEK_API_KEY=your-deepseek-api-key
+OPENAI_BASE_URL=https://api.deepseek.com
+OPENAI_MODEL=deepseek-v4-flash
+```
+
+当前仓库的本机 `.env` 已切换到上述 DeepSeek 地址和模型；密钥值不写入 Git。
+
+未设置 `OPENAI_BASE_URL` 和 `OPENAI_MODEL` 时，系统使用 `enterprise_rag/config.py` 中的默认值。连接 DashScope 或 DeepSeek 时优先读取对应专用 Key，避免误用操作系统中为其他服务配置的 `OPENAI_API_KEY`；未提供专用变量时仍兼容原有 `OPENAI_API_KEY`。
 
 配置优先级为：启动进程中显式设置的环境变量 > 项目根目录 `.env` > `enterprise_rag/.env`。因此部署平台或启动脚本可以覆盖本地文件，而根目录配置仍可覆盖包内示例值。更新 Key 或运行目录后必须重启 FastAPI 服务；日志只输出 Key 指纹，不输出明文。
 
@@ -396,7 +406,7 @@ Get-Content "$env:RAG_DATA_DIR\logs\error.log" -Tail 50
 
 **模型无法连接**
 
-默认 DashScope 配置应检查 `.env` 中的 `DASHSCOPE_API_KEY`、`OPENAI_BASE_URL` 和 `OPENAI_MODEL`；其他 OpenAI 兼容服务检查 `OPENAI_API_KEY`。修改后必须重启 FastAPI。若界面提示“模型鉴权失败”，说明请求已经到达模型服务，但当前 Key 未通过认证。
+默认配置应检查 `.env` 中与服务匹配的 Key、`OPENAI_BASE_URL` 和 `OPENAI_MODEL`：DashScope 使用 `DASHSCOPE_API_KEY`，DeepSeek 使用 `DEEPSEEK_API_KEY`，其他 OpenAI 兼容服务使用 `OPENAI_API_KEY`。修改后必须重启 FastAPI。若界面提示“模型鉴权失败”，说明请求已经到达模型服务，但当前 Key 未通过认证。
 
 **知识库显示为空，但提问提示“检索服务暂时不可用”**
 

@@ -38,8 +38,9 @@ tokens:
 
 These values are recorded from a user-provided image, not independently
 verified against a provider source. They are therefore **not** added to the
-active price table. The current runtime model is `qwen3.7-flash`, so applying
-these numbers now would be a model-mapping error.
+active price table. The current `.env` model is `qwen3.7-flash`, while the
+repository fallback configuration is `deepseek-v4-flash`; applying these
+numbers without confirming the active model would be a model-mapping error.
 
 The current estimator also cannot infer cache-hit tokens or Beijing peak
 windows from the existing usage payload. Before enabling a DeepSeek profile,

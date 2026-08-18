@@ -56,6 +56,9 @@ def test_stream_usage_is_collected_from_terminal_chunk(monkeypatch):
 def test_stream_usage_option_falls_back_once_before_first_chunk(monkeypatch):
     from enterprise_rag.llm import client
 
+    # The runtime default is conservative for DeepSeek/OpenAI-compatible
+    # endpoints; this test explicitly exercises the optional parameter path.
+    monkeypatch.setattr(client, "LLM_STREAM_USAGE_MODE", "on")
     calls = []
     unsupported = ValueError("stream_options is not supported")
     unsupported.status_code = 400

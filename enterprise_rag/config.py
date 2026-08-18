@@ -62,8 +62,8 @@ if _legacy_kb_dir and Path(_legacy_kb_dir).expanduser() != KB_DATA_DIR:
 # =========================
 # 1. API 与模型配置
 # =========================
-BASE_URL = os.getenv("OPENAI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-LLM_MODEL = os.getenv("OPENAI_MODEL", "qwen3.7-max")
+BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com")
+LLM_MODEL = os.getenv("OPENAI_MODEL", "deepseek-v4-flash")
 # ``auto`` enables terminal stream usage on DashScope only. Custom
 # OpenAI-compatible gateways must opt in explicitly because support for
 # ``stream_options`` is not part of every compatibility layer.
@@ -74,12 +74,15 @@ LLM_PRICE_TABLE_PATH = Path(
     os.getenv("LLM_PRICE_TABLE_PATH", str(PROJECT_ROOT / "config" / "llm_prices.json"))
 ).expanduser()
 MODEL_NAME = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
-# DashScope 与 OpenAI 可能同时配置在同一台机器上。连接 DashScope 时优先使用
-# 服务商专用变量，避免把全局 OPENAI_API_KEY 误发给 DashScope 并触发 401。
+# DashScope、DeepSeek 与 OpenAI 可能同时配置在同一台机器上。连接已识别的
+# 服务商时优先使用专用变量，避免把其他服务的 OPENAI_API_KEY 误发出去。
 _USE_DASHSCOPE = "dashscope.aliyuncs.com" in BASE_URL.lower()
+_USE_DEEPSEEK = "api.deepseek.com" in BASE_URL.lower()
 API_KEY_ENV_NAME = (
     "DASHSCOPE_API_KEY"
     if _USE_DASHSCOPE and os.getenv("DASHSCOPE_API_KEY")
+    else "DEEPSEEK_API_KEY"
+    if _USE_DEEPSEEK and os.getenv("DEEPSEEK_API_KEY")
     else "OPENAI_API_KEY"
 )
 API_KEY = os.getenv(API_KEY_ENV_NAME)
