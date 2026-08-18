@@ -5,6 +5,8 @@ import type {
   ChatMessage,
   ChatMessageStatus,
   ChatStreamError,
+  FeedbackStatus,
+  FeedbackVerdict,
 } from "../types";
 
 const MAX_MESSAGES = 80;
@@ -18,6 +20,10 @@ interface ChatState {
   finishMessage: (id: string, meta: ChatDoneMeta) => void;
   failMessage: (id: string, error: ChatStreamError) => void;
   markActionUsed: (id: string, action: ChatAction) => void;
+  setMessageFeedback: (
+    id: string,
+    feedback: { status: FeedbackStatus; verdict?: FeedbackVerdict; error?: string },
+  ) => void;
   setStreaming: (isStreaming: boolean) => void;
 }
 
@@ -50,6 +56,7 @@ export const useChat = create<ChatState>((set) => ({
       messages: updateMessage(state.messages, id, (message) => ({
         ...message,
         meta,
+        messageId: meta.message_id ?? message.messageId,
         status: "complete",
         request: message.request
           ? {
@@ -73,6 +80,10 @@ export const useChat = create<ChatState>((set) => ({
         ...message,
         actionState: { ...message.actionState, [action]: true },
       })),
+    })),
+  setMessageFeedback: (id, feedback) =>
+    set((state) => ({
+      messages: updateMessage(state.messages, id, (message) => ({ ...message, feedback })),
     })),
   setStreaming: (isStreaming) => set({ isStreaming }),
 }));

@@ -1,6 +1,17 @@
 export type ChatRole = "user" | "assistant";
 export type ChatMessageStatus = "streaming" | "complete" | "stopped" | "error";
 export type ChatAction = "general" | "draft";
+export type FeedbackVerdict = "up" | "down";
+export type FeedbackStatus = "submitting" | "submitted" | "error";
+export type FeedbackReason =
+  | "not_accurate"
+  | "missing_source"
+  | "wrong_source"
+  | "refusal_unexpected"
+  | "latency"
+  | "irrelevant"
+  | "unsafe"
+  | "other";
 
 export interface ChatDoneMeta {
   sources?: string[];
@@ -27,6 +38,8 @@ export interface ChatDoneMeta {
   is_draft?: boolean;
   query?: string;
   retrieval_query?: string;
+  message_id?: string;
+  feedback_eligible?: boolean;
 }
 
 export interface ChatStreamError {
@@ -48,4 +61,10 @@ export interface ChatMessage {
   };
   action?: ChatAction;
   actionState?: Partial<Record<ChatAction, boolean>>;
+  messageId?: string;
+  feedback?: {
+    verdict?: FeedbackVerdict;
+    status: FeedbackStatus;
+    error?: string;
+  };
 }

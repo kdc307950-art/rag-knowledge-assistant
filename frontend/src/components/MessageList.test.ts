@@ -34,6 +34,36 @@ describe("MessageList", () => {
     expect(rejected).not.toContain("不应显示.pdf");
   });
 
+  it("renders feedback controls only when the server made the answer eligible", () => {
+    const eligible = renderToStaticMarkup(
+      createElement(MessageList, {
+        onFeedback: () => undefined,
+        messages: [{
+          id: "eligible",
+          role: "assistant",
+          content: "有依据的回答。",
+          status: "complete",
+          meta: { is_kb: true, feedback_eligible: true, message_id: "m-1" },
+        }],
+      }),
+    );
+    const ineligible = renderToStaticMarkup(
+      createElement(MessageList, {
+        onFeedback: () => undefined,
+        messages: [{
+          id: "ineligible",
+          role: "assistant",
+          content: "通用回答。",
+          status: "complete",
+          meta: { is_kb: false, feedback_eligible: true, message_id: "m-2" },
+        }],
+      }),
+    );
+    expect(eligible).toContain("有帮助");
+    expect(eligible).toContain("不满意的原因");
+    expect(ineligible).not.toContain("有帮助");
+  });
+
   it("renders a preserved-partial-output state for interrupted errors", () => {
     const markup = renderToStaticMarkup(
       createElement(MessageList, {

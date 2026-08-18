@@ -17,7 +17,7 @@ from enterprise_rag.config import LOG_BACKUP_COUNT, LOG_DIR, LOG_LEVEL, LOG_MAX_
 from enterprise_rag.services.diagnostics_service import build_diagnostics
 from enterprise_rag.utils.logger import setup_logger
 
-from .api import auth as auth_api, chat, diagnostics, kb, metrics, probes, upload
+from .api import auth as auth_api, chat, diagnostics, feedback, kb, metrics, probes, upload
 from .auth import require_access
 from .observability.middleware import ObservabilityMiddleware
 
@@ -70,7 +70,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=True,
-    expose_headers=["X-Session-Id", "X-Request-Id"],
+    expose_headers=["X-Session-Id", "X-Request-Id", "X-Message-Id"],
 )
 app.add_middleware(ObservabilityMiddleware)
 
@@ -82,6 +82,7 @@ app.include_router(probes.router, prefix="/api")
 app.include_router(metrics.router)
 app.include_router(auth_api.router, prefix="/api")
 app.include_router(chat.router, prefix="/api", dependencies=api_dependencies)
+app.include_router(feedback.router, prefix="/api", dependencies=api_dependencies)
 app.include_router(upload.router, prefix="/api", dependencies=api_dependencies)
 app.include_router(kb.router, prefix="/api", dependencies=api_dependencies)
 app.include_router(diagnostics.router, prefix="/api", dependencies=api_dependencies)

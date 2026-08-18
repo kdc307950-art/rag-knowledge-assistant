@@ -201,6 +201,27 @@ uv run python scripts/sync_document_governance.py --apply
 
 `multi_user` 中，`APP_PASSWORD` 是可选的高权限服务账户兼容通道，只供自动化脚本或受控监控使用；普通用户通过用户名密码登录，浏览器使用 HttpOnly Cookie，会话也兼容 Bearer Token。它不会再作为 token 签名密钥。
 
+### 回答质量反馈
+
+质量反馈默认关闭。启用前生成并安全保存独立 Fernet key；密钥丢失后历史问题和回答无法恢复。`quality.sqlite3` 只对问题和回答使用应用层加密，SQLite 的审计元数据不是整库加密。普通用户只能对自己的、服务端标记为可反馈的知识库回答提交一次赞或踩；admin 可评审反馈，不能篡改原始 verdict。
+
+```powershell
+$env:QUALITY_CAPTURE_ENABLED="1"
+$env:QUALITY_ENCRYPTION_KEY=(uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+uv run python scripts/purge_quality_data.py
+```
+
+将 `QUALITY_ENCRYPTION_KEY` 保存到部署密钥存储，不要提交到 `.env`、日志或评估数据。生产环境应每日运行 `scripts/purge_quality_data.py`，并把 `data/quality.sqlite3` 与密钥恢复步骤纳入演练。`AUTH_DB_PATH` 和 `QUALITY_DB_PATH` 必须位于 `RAG_DATA_DIR`，这样离线备份可以把用户、token 吊销记录和质量反馈与知识库一起恢复。
+
+管理员评审为 `accepted` 的反馈只能导出为人工标注候选，且必须写在本地、Git 忽略的 `eval/dev/`：
+
+```powershell
+uv run python scripts/export_feedback_cases.py `
+  --output eval/dev/feedback-candidates.jsonl
+```
+
+导出内容包含加密库解密后的问题和回答，按敏感业务数据处理。它不是黄金集，不能直接由评估器运行；`eval/holdout/` 只能人工维护，脚本会拒绝写入。
+
 ```powershell
 $env:DEPLOYMENT_MODE="multi_user"
 $env:AUTH_MODE="users"
@@ -258,6 +279,13 @@ data/                     所有运行数据的默认根目录
 | `AUTH_TOKEN_TTL_SECONDS` | `28800` | Bearer token 有效期，最短 300 秒 |
 | `AUTH_COOKIE_NAME` | `rag_access` | 浏览器会话 Cookie 名称 |
 | `AUTH_COOKIE_SECURE` | `0` | HTTPS 生产环境必须设为 `1` |
+| `QUALITY_CAPTURE_ENABLED` | `0` | 启用单租户回答质量反馈；需要同时配置 Fernet key |
+| `QUALITY_DB_PATH` | `./data/quality.sqlite3` | 加密问题/回答及反馈的单一 SQLite 存储位置 |
+| `QUALITY_ENCRYPTION_KEY` | 空 | 部署管理的 Fernet key；不能自动生成或写入日志 |
+| `QUALITY_RETENTION_DAYS` | `30` | 质量 run/反馈保留天数；通过外部清理脚本执行删除 |
+| `QUALITY_MAX_QUERY_CHARS` | `4000` | 入库前的问题最大字符数 |
+| `QUALITY_MAX_ANSWER_CHARS` | `12000` | 入库前的回答最大字符数 |
+| `QUALITY_FEEDBACK_LIMIT_PER_HOUR` | `30` | 单个用户每小时可创建的反馈上限；幂等重试不消耗额度 |
 | `METRICS_TOKEN` | 空 | `/metrics` 的独立访问令牌；未设置时仅允许 loopback |
 | `ALERT_WEBHOOK_URL` | 空 | 外部健康检查的尽力而为 webhook，不写入日志 |
 | `RAG_DATA_DIR` | `<项目根>/data` | 统一迁移缓存、Chroma 与 manifest 的运行数据根目录 |

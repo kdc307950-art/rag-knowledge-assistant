@@ -36,6 +36,8 @@ REQUIRED_ENTRIES = ("kb_data", "kb_manifest.sqlite3")
 SQLITE_PATHS = (
     "kb_manifest.sqlite3",
     "answer_cache.sqlite3",
+    "auth.sqlite3",
+    "quality.sqlite3",
     "kb_data/chroma.sqlite3",
 )
 REPLACE_RETRIES = 8

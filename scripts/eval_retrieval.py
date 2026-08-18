@@ -36,6 +36,7 @@ from enterprise_rag.config import (  # noqa: E402
 from enterprise_rag.core.exceptions import KnowledgeBaseBusyError  # noqa: E402
 from enterprise_rag.rag.retriever import retrieve_context  # noqa: E402
 from enterprise_rag.storage.document_governance import retrieval_policy  # noqa: E402
+from enterprise_rag.storage.kb_manifest import get_manifest  # noqa: E402
 
 
 SCHEMA_VERSION = 2
@@ -43,6 +44,7 @@ SUPPORTED_SCHEMA_VERSIONS = {1, SCHEMA_VERSION}
 K_VALUES = (1, 3, 5)
 TAG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 SOURCE_POLICIES = {"authoritative_only", "all_required", "any_equivalent"}
+EVALUATION_PROFILE = "retrieval-v2"
 
 
 def _validate_tags(path: Path, line_number: int, value: Any) -> list[str]:
@@ -373,6 +375,7 @@ def _evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
 
 def evaluate(cases_path: Path) -> dict[str, Any]:
     cases, cases_sha256 = _load_cases(cases_path)
+    corpus_snapshot = _corpus_snapshot()
     results = [_evaluate_case(case) for case in cases]
     answerable = [item for item in results if not item["expected_refusal"] and item["status"] == "ok"]
     refusal_cases = [item for item in results if item["expected_refusal"] and item["status"] == "ok"]
@@ -436,8 +439,10 @@ def evaluate(cases_path: Path) -> dict[str, Any]:
     metrics["refusal_evaluable_count"] = len(refusal_cases)
     return {
         "schema_version": SCHEMA_VERSION,
+        "evaluation_profile": EVALUATION_PROFILE,
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "cases_sha256": cases_sha256,
+        "corpus_snapshot": corpus_snapshot,
         "config": {
             "retrieval_version": RETRIEVAL_VERSION,
             "model_version": MODEL_VERSION,
@@ -462,18 +467,66 @@ def _file_sha256(path: Path) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _corpus_snapshot() -> dict[str, Any]:
+    """Bind an evaluation result to the active manifest content and revision."""
+    payload = get_manifest().fingerprint_snapshot()
+    sources = payload.get("sources") or []
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return {
+        "manifest_generation": int(payload.get("generation") or 0),
+        "manifest_initialized": bool(payload.get("initialized")),
+        "source_count": len(sources),
+        "chunk_count": sum(int(item.get("chunk_count") or 0) for item in sources),
+        "sources": sources,
+        "sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+    }
+
+
+def compare_baseline(report: dict[str, Any], baseline_path: Path) -> dict[str, Any]:
+    """Refuse metric comparison when the active corpus differs from baseline."""
+    try:
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"compatible": False, "reason": f"baseline_unreadable:{type(exc).__name__}"}
+    expected = (
+        baseline.get("corpus_snapshot", {}).get("sha256")
+        if isinstance(baseline, dict)
+        else None
+    )
+    actual = report.get("corpus_snapshot", {}).get("sha256")
+    if not expected:
+        return {"compatible": False, "reason": "baseline_missing_corpus_fingerprint"}
+    if expected != actual:
+        return {"compatible": False, "reason": "corpus_fingerprint_mismatch"}
+    return {"compatible": True, "reason": "ok"}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", type=Path, required=True)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        help="require a matching corpus fingerprint; mismatch exits with code 3",
+    )
     args = parser.parse_args()
     report = evaluate(args.cases)
+    comparison = None
+    if args.baseline:
+        comparison = compare_baseline(report, args.baseline)
+        report["baseline_comparison"] = {"path": str(args.baseline), **comparison}
     payload = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(payload, encoding="utf-8")
     print(payload, end="")
-    return 0
+    return 0 if comparison is None or comparison["compatible"] else 3
 
 
 if __name__ == "__main__":

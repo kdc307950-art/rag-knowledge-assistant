@@ -9,6 +9,8 @@ export type StreamCallbacks = {
 
 export type StreamOptions = StreamCallbacks & {
   signal: AbortSignal;
+  /** Only ordinary /chat requests receive an idempotency/feedback message ID. */
+  messageId?: string;
 };
 
 const DONE_BOOLEAN_KEYS = [
@@ -31,6 +33,18 @@ class SseProtocolError extends Error {
     super(message);
     this.name = "SseProtocolError";
   }
+}
+
+function newMessageId(): string {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  globalThis.crypto?.getRandomValues?.(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -85,6 +99,12 @@ function parseDoneMeta(value: unknown): ChatDoneMeta {
   }
   if (typeof value.retrieval_query === "string") {
     meta.retrieval_query = value.retrieval_query;
+  }
+  if (typeof value.message_id === "string") {
+    meta.message_id = value.message_id;
+  }
+  if (typeof value.feedback_eligible === "boolean") {
+    meta.feedback_eligible = value.feedback_eligible;
   }
   for (const key of DONE_BOOLEAN_KEYS) {
     const candidate = value[key];
@@ -176,6 +196,9 @@ async function streamJson(
     method: "POST",
     body: JSON.stringify(body),
     signal: options.signal,
+    headers: path === "/chat" && options.messageId
+      ? { "X-Message-Id": options.messageId }
+      : undefined,
   });
   captureSessionId(response);
 
@@ -223,7 +246,7 @@ async function streamJson(
 }
 
 export function streamChat(query: string, options: StreamOptions): Promise<void> {
-  return streamJson("/chat", { query }, options);
+  return streamJson("/chat", { query }, { ...options, messageId: options.messageId ?? newMessageId() });
 }
 
 export function streamGeneral(query: string, options: StreamOptions): Promise<void> {

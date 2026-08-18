@@ -26,6 +26,8 @@ def _runtime_data(root, value: str = "original"):
     data = root / "data"
     _sqlite(data / "kb_manifest.sqlite3", value)
     _sqlite(data / "answer_cache.sqlite3", "cache")
+    _sqlite(data / "auth.sqlite3", "users")
+    _sqlite(data / "quality.sqlite3", "feedback")
     _sqlite(data / "kb_data" / "chroma.sqlite3", "chroma")
     (data / "kb_data" / "index.bin").write_bytes(b"hnsw-data")
     (data / "background.json").write_text('{"enabled":true}', encoding="utf-8")
@@ -54,7 +56,9 @@ def test_create_and_verify_backup(tmp_path):
     result = verify_backup(backup)
 
     assert result["ok"] is True
-    assert result["file_count"] == 5
+    assert result["file_count"] == 7
+    assert result["sqlite_checks"]["auth.sqlite3"] == "ok"
+    assert result["sqlite_checks"]["quality.sqlite3"] == "ok"
     assert not (backup / "data" / "upload_staging").exists()
 
 

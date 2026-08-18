@@ -29,6 +29,7 @@ backups/
 pure_chroma_probe/
 /eval/recovered_sources/
 /eval/results/
+/eval/dev/
 
 # Local audit/probe scripts
 /_*.py

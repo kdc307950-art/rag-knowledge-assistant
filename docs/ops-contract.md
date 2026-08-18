@@ -13,6 +13,7 @@
 | access.log | 7 天 | 按文件大小滚动，并在应用启动时按时间删除旧文件。 |
 | audit.log | 90 天 | 记录上传、删除、清空、备份和鉴权失败，不记录查询正文或密钥。 |
 | error.log | 30 天 | 只用于异常摘要，不作为请求错误率的分母；旧文件在启动时清理。 |
+| 质量反馈 | 默认关闭；启用后最多 30 天 | `runs` 与 `feedback` 共用一个 SQLite 文件，问题和回答字段使用部署密钥进行应用层加密。 |
 
 ## 端点契约
 
@@ -27,11 +28,15 @@ access 日志只包含模板路由、方法、状态、耗时、SSE 业务终态
 
 SSE 的 HTTP 状态通常是 `200`，因此错误率必须使用业务终态：`ok`、`error`、`interrupted`。中断原因当前无法可靠区分用户点击停止与网络断开，所以 `interrupted` 不参与“模型故障”告警。
 
+质量反馈只适用于已完成的普通知识库回答。浏览器为每次 `/api/chat` 发送 `X-Message-Id`；服务端先同步写入 `runs` 的终态，再在 `done` 事件中声明 `feedback_eligible=true`。点赞和点踩不可由普通用户删除或改写；相同 verdict 幂等，反向 verdict 冲突，管理员可以审阅但不改写原始反馈。该功能是单租户审计闭环，不构成多租户隔离。
+
+`quality.sqlite3` 使用 SQLite 的 WAL、`busy_timeout` 和外键约束；问题和回答列由 `QUALITY_ENCRYPTION_KEY` 做应用层 Fernet 加密。SQLite 的 schema、时间戳、用户 ID、来源标签和反馈分类仍是明文元数据，因此这不是 SQLCipher 意义上的“整库加密”，数据库文件与密钥必须分别纳入受控存储和备份策略。不要将该 key 写入日志、评估样本或源码。
+
 LLM 指标按 SDK 实际调用尝试计数；tenacity 重试会产生多个 attempt，这是故意保留的稳定性信号，不把它伪装成一次逻辑请求。`rag_llm_tokens_total` 只记录供应商实际返回的 input/output token，缺失或中断时保持未知，不用字符数估算。`rag_llm_cost_estimated_total` 只按 `LLM_PRICE_TABLE_PATH` 的价格表计算，精确匹配标记 `exact`，均价降级标记 `estimated`，无价格时不生成成本；任何成本都不是供应商账单。流式 usage 默认仅对 DashScope 兼容地址开启；自定义 OpenAI-compatible 地址需将 `LLM_STREAM_USAGE_MODE=on` 显式打开。检索指标按最终去重且过阈值的结果记录 `hit/empty/error/busy`，拒答只在严格知识库拒答分支计数；检索、重排和 LLM 生成的阶段耗时写入 access 事件。
 
 ## 备份边界
 
-Chroma/HNSW 没有本项目可依赖的在线热快照契约。创建或恢复前停止 FastAPI 以及其他写入者，并传入 `--confirm-stopped`。备份目录、`kb_data/`、`kb_manifest.sqlite3` 和回答缓存必须作为同一运行数据单元处理；恢复前先校验哈希和 SQLite `quick_check`。
+Chroma/HNSW 没有本项目可依赖的在线热快照契约。创建或恢复前停止 FastAPI 以及其他写入者，并传入 `--confirm-stopped`。`RAG_DATA_DIR` 是唯一的运行数据备份单元：其中的 `kb_data/`、`kb_manifest.sqlite3`、回答缓存、`auth.sqlite3` 和启用后的 `quality.sqlite3` 必须一起处理；恢复前先校验哈希和 SQLite `quick_check`。`AUTH_DB_PATH` 与 `QUALITY_DB_PATH` 被限制在该目录内，不能用外部路径绕过备份。
 
 外部健康检查读取 `verification_ledger.jsonl`，只承认最近一次实际验证成功的备份，不把目录修改时间当成备份新鲜度。
 
@@ -40,6 +45,8 @@ Chroma/HNSW 没有本项目可依赖的在线热快照契约。创建或恢复�
 默认监听 `127.0.0.1`、单进程单 worker。`DEPLOYMENT_MODE=dev` 仅允许本地开发；局域网或公网暴露必须使用 `single_user` 或 `multi_user` 并启用 HTTPS。`single_user` 使用 `APP_PASSWORD`；`multi_user` 使用 Bearer Token、本地 SQLite 用户和检索前 ACL，且必须有独立 `AUTH_SECRET` 与至少一个 active admin。`APP_PASSWORD` 在 multi-user 中仅作为可选高权限服务账户，不是普通用户凭据，也不能作为 token 密钥。本项目没有租户隔离或多实例写入支持。
 
 浏览器登录使用 HttpOnly `rag_access` Cookie，生产 HTTPS 必须设置 `AUTH_COOKIE_SECURE=1`；Bearer 只作为脚本、测试和受控客户端兼容协议。认证 Cookie、用户库和治理配置必须纳入备份与恢复演练。
+
+若启用质量反馈，生产部署还必须配置独立的 Fernet key、每日执行保留期清理，并把 `quality.sqlite3` 纳入同一受控备份域。密钥丢失会使历史问题和回答不可解密，不能通过重置应用恢复。
 
 反向代理不得把 `/api/live`、`/api/ready` 直接暴露给公网；它们应仅供本机或受控监控网段访问。若代理 `/metrics`，必须配置 `METRICS_TOKEN`，因为反向代理的 loopback 来源会绕过“仅本机”判断。
 

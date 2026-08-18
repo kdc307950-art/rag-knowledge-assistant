@@ -62,12 +62,15 @@ document and its metadata, then changed to `approved`.
 ```powershell
 uv run python scripts/eval_retrieval.py `
   --cases eval/retrieval_cases.jsonl `
-  --output eval/results/retrieval-<date>.json
+  --output eval/results/retrieval-<date>.json `
+  --baseline eval/results/retrieval-previous.json
 ```
 
-The report records the case-file hash, retrieval/model configuration, and the
-`document_governance_sha256` policy snapshot so a future result cannot be
-compared silently across index generations or governance-state changes.
+The report records the case-file hash, retrieval/model configuration, the
+`document_governance_sha256` policy snapshot, and a manifest corpus snapshot
+with generation, active revision, content hash, and chunk count for every
+active source. `--baseline` refuses comparison with exit code `3` when the
+prior report lacks that fingerprint or its corpus differs.
 It also reports `evaluation_error_rate` and `busy_rate`; a high Recall/MRR with
 non-zero evaluation errors is not a valid clean baseline.
 
@@ -82,6 +85,15 @@ uv run python scripts/inspect_kb_metadata.py `
 
 The command prints metadata and a short excerpt only. It does not create or
 approve a case file.
+
+## Feedback Candidates
+
+`scripts/export_feedback_cases.py` exports only admin-accepted feedback to
+`eval/dev/`. The output is Git-ignored and contains decrypted question/answer
+text, so it must be treated as sensitive. Each record is marked
+`manual_label_required=true`; reviewers must verify sources and add evidence
+anchors before creating an approved retrieval case. The script refuses to
+write to `eval/holdout/`, which remains manual-only.
 
 ## Groundedness Review
 

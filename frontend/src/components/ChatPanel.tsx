@@ -1,13 +1,22 @@
 import { useRef } from "react";
 import { ApiError, friendlyApiError } from "../api/client";
+import { friendlyFeedbackError, submitAnswerFeedback } from "../api/feedback";
 import { streamChat, streamDraft, streamGeneral, type StreamOptions } from "../api/sse";
 import { useChat } from "../store/chat";
-import type { ChatAction, ChatMessage } from "../types";
+import type { ChatAction, ChatMessage, FeedbackReason, FeedbackVerdict } from "../types";
 import ChatInput from "./ChatInput";
 import MessageList from "./MessageList";
 
 function newMessageId() {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  globalThis.crypto?.getRandomValues?.(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function isAbortError(error: unknown) {
@@ -40,6 +49,7 @@ export default function ChatPanel() {
   const finishMessage = useChat((state) => state.finishMessage);
   const failMessage = useChat((state) => state.failMessage);
   const markActionUsed = useChat((state) => state.markActionUsed);
+  const setMessageFeedback = useChat((state) => state.setMessageFeedback);
   const setStreaming = useChat((state) => state.setStreaming);
   const controllerRef = useRef<AbortController | null>(null);
   const activeRunRef = useRef(0);
@@ -52,8 +62,10 @@ export default function ChatPanel() {
     const runId = activeRunRef.current + 1;
     activeRunRef.current = runId;
     const controller = new AbortController();
+    const messageId = action ? undefined : newMessageId();
     const assistantMessage: ChatMessage = {
-      id: newMessageId(),
+      id: messageId ?? newMessageId(),
+      messageId,
       role: "assistant",
       content: "",
       status: "streaming",
@@ -71,6 +83,7 @@ export default function ChatPanel() {
     const isCurrent = () => activeRunRef.current === runId && !controller.signal.aborted;
     const callbacks: StreamOptions = {
       signal: controller.signal,
+      messageId,
       onToken: (token) => {
         if (isCurrent()) {
           appendToken(assistantMessage.id, token);
@@ -141,9 +154,33 @@ export default function ChatPanel() {
     controller.abort();
   };
 
+  const submitFeedback = (
+    message: ChatMessage,
+    verdict: FeedbackVerdict,
+    reason?: FeedbackReason,
+  ) => {
+    const messageId = message.meta?.message_id ?? message.messageId;
+    if (!messageId || message.feedback?.status === "submitting") {
+      return;
+    }
+    setMessageFeedback(message.id, { status: "submitting", verdict });
+    void submitAnswerFeedback(messageId, verdict, reason)
+      .then(() => setMessageFeedback(message.id, { status: "submitted", verdict }))
+      .catch((error: unknown) => setMessageFeedback(message.id, {
+        status: "error",
+        verdict,
+        error: friendlyFeedbackError(error),
+      }));
+  };
+
   return (
     <section className="mx-auto flex h-full w-full max-w-5xl flex-col bg-gray-50">
-      <MessageList messages={messages} isStreaming={isStreaming} onAction={runAction} />
+      <MessageList
+        messages={messages}
+        isStreaming={isStreaming}
+        onAction={runAction}
+        onFeedback={submitFeedback}
+      />
       <ChatInput isStreaming={isStreaming} onSubmit={submit} onStop={stop} />
     </section>
   );

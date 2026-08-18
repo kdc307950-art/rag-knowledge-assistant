@@ -114,6 +114,9 @@ describe("streamChat", () => {
     expect(session.getItem(SESSION_ID_STORAGE_KEY)).toBe("new-session");
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-API-Key")).toBe("test-key");
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-Session-Id")).toBe("previous-session");
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-Message-Id")).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
   });
 
   it("preserves delivered tokens before an error even when partial is false", async () => {
@@ -217,6 +220,7 @@ describe("streamChat", () => {
     expect(init?.body).toBe(JSON.stringify({ query: "帮我写通知" }));
     expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
     expect(received.done).toEqual({ is_kb: false, is_general: true });
+    expect(new Headers(init?.headers).get("X-Message-Id")).toBeNull();
   });
 
   it("posts the canonical retrieval query to the drafting endpoint", async () => {

@@ -101,6 +101,38 @@ class KnowledgeBaseManifest:
             finally:
                 connection.close()
 
+    def fingerprint_snapshot(self) -> dict:
+        """Return one atomic manifest view suitable for evaluation identity."""
+        with _MANIFEST_LOCK:
+            connection = self._connect()
+            try:
+                with connection:
+                    generation = self._generation(connection)
+                    rows = connection.execute(
+                        """
+                        SELECT source, active_revision, content_hash, chunk_count
+                        FROM source_manifest ORDER BY source
+                        """
+                    ).fetchall()
+                    initialized = connection.execute(
+                        "SELECT value FROM manifest_metadata WHERE name = 'schema_initialized'"
+                    ).fetchone()
+                return {
+                    "generation": generation,
+                    "initialized": bool(initialized and initialized[0] == "1"),
+                    "sources": [
+                        {
+                            "source": str(source),
+                            "active_revision": str(revision),
+                            "content_hash": str(content_hash),
+                            "chunk_count": int(chunk_count),
+                        }
+                        for source, revision, content_hash, chunk_count in rows
+                    ],
+                }
+            finally:
+                connection.close()
+
     def get_source(self, source: str) -> dict | None:
         """读取单个来源的激活版本、内容摘要和已提交分块数。"""
         with _MANIFEST_LOCK:

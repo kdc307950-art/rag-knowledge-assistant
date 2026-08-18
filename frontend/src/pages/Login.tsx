@@ -7,6 +7,7 @@ export default function Login() {
   const completeLogin = useAuth((s) => s.completeLogin);
   const loginUser = useAuth((s) => s.loginUser);
   const logout = useAuth((s) => s.logout);
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -56,4 +57,3 @@ export default function Login() {
     </div>
   );
 }
-  const [username, setUsername] = useState("");

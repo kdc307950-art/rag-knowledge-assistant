@@ -4,6 +4,30 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolate_manifest_snapshot(monkeypatch):
+    from scripts import eval_retrieval
+
+    class Manifest:
+        def fingerprint_snapshot(self):
+            return {
+                "generation": 7,
+                "initialized": True,
+                "sources": [
+                    {
+                        "source": "a.txt",
+                        "active_revision": "rev-a",
+                        "content_hash": "hash-a",
+                        "chunk_count": 3,
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(eval_retrieval, "get_manifest", lambda: Manifest())
+
 
 def test_evaluator_calls_retrieval_directly_and_calculates_metrics(monkeypatch, tmp_path):
     from scripts import eval_retrieval
@@ -68,6 +92,8 @@ def test_evaluator_calls_retrieval_directly_and_calculates_metrics(monkeypatch, 
         "unresolved", "authoritative", "all_active"
     }
     assert report["config"]["document_governance_sha256"]
+    assert report["corpus_snapshot"]["manifest_generation"] == 7
+    assert report["corpus_snapshot"]["sources"][0]["content_hash"] == "hash-a"
 
 
 def test_evaluator_rejects_ambiguous_case_schema(tmp_path):
@@ -249,3 +275,28 @@ def test_source_policies_produce_separate_metrics(monkeypatch, tmp_path):
         "all_required": 1,
         "any_equivalent": 1,
     }
+
+
+def test_baseline_comparison_rejects_missing_or_changed_corpus_fingerprint(tmp_path):
+    from scripts.eval_retrieval import compare_baseline
+
+    report = {"corpus_snapshot": {"sha256": "current"}}
+    missing = tmp_path / "old.json"
+    missing.write_text("{}", encoding="utf-8")
+    assert compare_baseline(report, missing) == {
+        "compatible": False,
+        "reason": "baseline_missing_corpus_fingerprint",
+    }
+    changed = tmp_path / "changed.json"
+    changed.write_text(
+        json.dumps({"corpus_snapshot": {"sha256": "other"}}), encoding="utf-8"
+    )
+    assert compare_baseline(report, changed) == {
+        "compatible": False,
+        "reason": "corpus_fingerprint_mismatch",
+    }
+    compatible = tmp_path / "compatible.json"
+    compatible.write_text(
+        json.dumps({"corpus_snapshot": {"sha256": "current"}}), encoding="utf-8"
+    )
+    assert compare_baseline(report, compatible) == {"compatible": True, "reason": "ok"}

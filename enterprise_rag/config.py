@@ -111,6 +111,45 @@ AUTH_COOKIE_SECURE = os.getenv("AUTH_COOKIE_SECURE", "0").strip().lower() in {
     "1", "true", "yes", "on"
 }
 
+# Quality feedback capture is opt-in because it stores encrypted query/answer
+# material for a bounded retention window.  The key must be supplied by the
+# deployment environment and must not be generated at runtime.
+QUALITY_CAPTURE_ENABLED = os.getenv("QUALITY_CAPTURE_ENABLED", "0").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+QUALITY_DB_PATH = Path(
+    os.getenv("QUALITY_DB_PATH", str(RUNTIME_DATA_DIR / "quality.sqlite3"))
+).expanduser()
+QUALITY_ENCRYPTION_KEY = os.getenv("QUALITY_ENCRYPTION_KEY", "").strip()
+QUALITY_RETENTION_DAYS = max(
+    1, int(_env_float("QUALITY_RETENTION_DAYS", 30, minimum=1))
+)
+QUALITY_MAX_QUERY_CHARS = max(
+    256, int(_env_float("QUALITY_MAX_QUERY_CHARS", 4000, minimum=256))
+)
+QUALITY_MAX_ANSWER_CHARS = max(
+    512, int(_env_float("QUALITY_MAX_ANSWER_CHARS", 12000, minimum=512))
+)
+QUALITY_FEEDBACK_LIMIT_PER_HOUR = max(
+    1, int(_env_float("QUALITY_FEEDBACK_LIMIT_PER_HOUR", 30, minimum=1))
+)
+
+
+def _require_runtime_data_path(name: str, path: Path) -> Path:
+    """Keep stateful security data in the one backup/restore unit."""
+    resolved = path.expanduser().resolve()
+    try:
+        resolved.relative_to(RUNTIME_DATA_DIR.expanduser().resolve())
+    except ValueError as exc:
+        raise ValueError(
+            f"{name} 必须位于 RAG_DATA_DIR 内；请迁移整个运行数据目录"
+        ) from exc
+    return resolved
+
+
+AUTH_DB_PATH = _require_runtime_data_path("AUTH_DB_PATH", AUTH_DB_PATH)
+QUALITY_DB_PATH = _require_runtime_data_path("QUALITY_DB_PATH", QUALITY_DB_PATH)
+
 
 def auth_readiness() -> dict:
     """Validate deployment/authentication mode without exposing secrets."""

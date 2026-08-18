@@ -6,8 +6,9 @@ import asyncio
 from dataclasses import dataclass
 import logging
 import threading
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
@@ -20,7 +21,8 @@ from enterprise_rag.services.rag_service import RagService, _general_failure_det
 from ..schemas import ChatRequest, DraftRequest, GeneralRequest
 from ..session import append_message, get_messages, get_or_create_session_id
 from ..sse import sse
-from ..observability.context import mark_sse_terminal
+from ..observability.context import get_request_telemetry, mark_sse_terminal
+from enterprise_rag.services.quality_service import DuplicateRunError, get_quality_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -98,7 +100,7 @@ def _terminal_event(payload: dict) -> tuple[str, dict]:
     }
 
 
-def _make_producer(iterator_factory, on_done):
+def _make_producer(iterator_factory, on_done, on_error=None, on_interrupted=None):
     """构建线程内同步迭代生成器的生产者。
 
     设计要点：
@@ -116,6 +118,8 @@ def _make_producer(iterator_factory, on_done):
             for chunk in gen:
                 if stop_event.is_set():
                     mark_sse_terminal("interrupted")
+                    if on_interrupted is not None:
+                        on_interrupted()
                     break
                 emit("token", chunk)
             if not stop_event.is_set():
@@ -129,9 +133,19 @@ def _make_producer(iterator_factory, on_done):
             if not stop_event.is_set():
                 logger.error("SSE 流式生成失败: %s", exc, exc_info=True)
                 message, code = _general_failure_details(exc)
+                if on_error is not None:
+                    try:
+                        on_error(code)
+                    except Exception:
+                        logger.exception("记录 SSE 失败 run 时发生异常")
                 mark_sse_terminal("error", code)
                 emit("error", {"code": code, "message": message, "partial": False})
             else:
+                if on_interrupted is not None:
+                    try:
+                        on_interrupted()
+                    except Exception:
+                        logger.exception("记录 SSE 中断 run 时发生异常")
                 mark_sse_terminal("interrupted")
         finally:
             if gen is not None:
@@ -229,29 +243,123 @@ async def chat(
     req: ChatRequest,
     request: Request,
     x_session_id: str | None = Header(default=None),
+    x_message_id: str | None = Header(default=None),
 ) -> StreamingResponse:
     """严格知识库问答：SSE 输出 token… → done / error；断开即停止生成。"""
+    if x_message_id:
+        try:
+            message_id = str(UUID(x_message_id))
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail="X-Message-Id 必须是 UUID") from exc
+    else:
+        message_id = str(uuid4())
     rag = RagService()
     session_id = get_or_create_session_id(x_session_id or req.session_id)
     messages = get_messages(session_id)
     history = _select_history(req.query, messages)
     collected: list[str] = []
+    generated: list[str] = []
     outcome = _StreamOutcome()
+    current_user = getattr(request.state, "current_user", None) or {}
+    try:
+        quality = get_quality_service()
+    except ValueError:
+        logger.exception("质量反馈配置无效，继续提供问答但禁用反馈")
+        quality = None
+    telemetry = get_request_telemetry()
+    run_id = telemetry.request_id if telemetry is not None else uuid4().hex
+    principal_id = str(current_user.get("id") or "local")
+    if quality is not None:
+        try:
+            quality.reserve_run(
+                run_id=run_id,
+                message_id=message_id,
+                principal_id=principal_id,
+                session_id=session_id,
+                action="chat",
+                query=req.query,
+            )
+        except DuplicateRunError as exc:
+            raise HTTPException(status_code=409, detail="X-Message-Id 已被使用") from exc
+        except Exception:
+            logger.exception("初始化质量 run 失败，继续提供问答但禁用反馈")
+            quality = None
+
+    is_greeting = ChatService._is_greeting(req.query)
+
+    def tracked_iterator(source):
+        for chunk in source:
+            generated.append(str(chunk))
+            yield chunk
 
     def iterator_factory():
-        if ChatService._is_greeting(req.query):
-            return iter([_GREETING_REPLY])
-        return rag.answer_stream(
-            req.query, history, messages,
-            access_context=getattr(request.state, "current_user", None),
+        source = (
+            iter([_GREETING_REPLY])
+            if is_greeting
+            else rag.answer_stream(
+                req.query,
+                history,
+                messages,
+                access_context=current_user,
+            )
         )
+        return tracked_iterator(source)
+
+    def finalize_quality(
+        terminal: str,
+        *,
+        error_code: str | None = None,
+        feedback_eligible: bool = False,
+        sources: list[str] | None = None,
+    ) -> bool:
+        """Commit a reserved run before exposing its terminal client state."""
+        if quality is None:
+            return False
+        try:
+            return quality.finalize_run(
+                run_id=run_id,
+                terminal=terminal,
+                answer="".join(generated),
+                sources=sources,
+                error_code=error_code,
+                feedback_eligible=feedback_eligible,
+            )
+        except Exception:
+            logger.exception("完成质量 run 落库失败")
+            return False
 
     def on_done():
-        if ChatService._is_greeting(req.query):
-            return {"sources": [], "is_kb": False}
-        return {**_meta_payload(rag), "is_kb": True}
+        metadata = (
+            {"sources": [], "is_kb": False}
+            if is_greeting
+            else {**_meta_payload(rag), "is_kb": True}
+        )
+        terminal, payload = _terminal_event(metadata)
+        sources = metadata.get("sources")
+        valid_sources = sources if isinstance(sources, list) else []
+        eligible = terminal == "done" and bool(generated) and not is_greeting
+        persisted = finalize_quality(
+            terminal,
+            error_code=payload.get("code") if terminal == "error" else None,
+            feedback_eligible=eligible,
+            sources=valid_sources,
+        )
+        payload["message_id"] = message_id
+        payload["feedback_eligible"] = bool(eligible and persisted)
+        return payload
 
-    producer = _make_producer(iterator_factory, on_done)
+    def on_error(code: str) -> None:
+        finalize_quality("error", error_code=code)
+
+    def on_interrupted() -> None:
+        finalize_quality("interrupted", error_code="interrupted")
+
+    producer = _make_producer(
+        iterator_factory,
+        on_done,
+        on_error=on_error,
+        on_interrupted=on_interrupted,
+    )
 
     async def event_stream():
         async for chunk in _run_sse(producer, collected, request, outcome):
@@ -270,6 +378,7 @@ async def chat(
         media_type="text/event-stream",
         headers={
             "X-Session-Id": session_id,
+            "X-Message-Id": message_id,
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
