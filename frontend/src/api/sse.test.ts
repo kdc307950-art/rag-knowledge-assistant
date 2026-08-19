@@ -1,9 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  API_KEY_STORAGE_KEY,
-  ApiError,
-  SESSION_ID_STORAGE_KEY,
-} from "./client";
+import { ApiError, SESSION_ID_STORAGE_KEY } from "./client";
 import { streamChat, streamDraft, streamGeneral } from "./sse";
 import type { ChatDoneMeta, ChatStreamError } from "../types";
 
@@ -65,7 +61,6 @@ describe("streamChat", () => {
   beforeEach(() => {
     storage = createStorage();
     session = createStorage();
-    storage.setItem(API_KEY_STORAGE_KEY, "test-key");
     dispatchEvent = vi.fn();
     vi.stubGlobal("localStorage", storage);
     vi.stubGlobal("sessionStorage", session);
@@ -112,7 +107,8 @@ describe("streamChat", () => {
       is_kb: true,
     });
     expect(session.getItem(SESSION_ID_STORAGE_KEY)).toBe("new-session");
-    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-API-Key")).toBe("test-key");
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-API-Key")).toBeNull();
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("Authorization")).toBeNull();
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-Session-Id")).toBe("previous-session");
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-Message-Id")).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
@@ -280,7 +276,6 @@ describe("streamChat", () => {
     await expect(
       streamChat("问题", { signal: new AbortController().signal, ...received }),
     ).rejects.toBeInstanceOf(ApiError);
-    expect(storage.getItem(API_KEY_STORAGE_KEY)).toBeNull();
     expect(session.getItem(SESSION_ID_STORAGE_KEY)).toBeNull();
     expect(dispatchEvent).toHaveBeenCalledOnce();
   });

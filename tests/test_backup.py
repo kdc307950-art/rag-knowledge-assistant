@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
+import json
 import sqlite3
 
 import pytest
@@ -60,6 +62,40 @@ def test_create_and_verify_backup(tmp_path):
     assert result["sqlite_checks"]["auth.sqlite3"] == "ok"
     assert result["sqlite_checks"]["quality.sqlite3"] == "ok"
     assert not (backup / "data" / "upload_staging").exists()
+
+
+def test_verify_allows_sqlite_sidecars_to_disappear(tmp_path):
+    """WAL/SHM are transient and must not invalidate the logical snapshot."""
+    data = _runtime_data(tmp_path)
+    backup = create_backup(
+        data_dir=data,
+        backup_root=tmp_path / "backups",
+        confirm_stopped=True,
+    )
+
+    manifest_path = backup / "backup_manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for suffix, content in (("-wal", b""), ("-shm", b"sidecar")):
+        relative = f"kb_manifest.sqlite3{suffix}"
+        sidecar = backup / "data" / relative
+        sidecar.write_bytes(content)
+        payload["files"].append(
+            {
+                "path": relative,
+                "size": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+        )
+    manifest_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    for suffix in ("-wal", "-shm"):
+        (backup / "data" / f"kb_manifest.sqlite3{suffix}").unlink()
+
+    result = verify_backup(backup)
+
+    assert result["ok"] is True
 
 
 def test_backup_refuses_unconfirmed_live_copy(tmp_path):

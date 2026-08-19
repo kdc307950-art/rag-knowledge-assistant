@@ -1,4 +1,4 @@
-import { request, setAccessToken, clearAccessToken } from "./client";
+import { request } from "./client";
 
 export interface AuthUser {
   id: number | string;
@@ -10,18 +10,20 @@ export interface AuthUser {
 }
 
 interface LoginResponse {
-  token: string;
   expires_in: number;
   user: AuthUser;
 }
 
 export async function loginUser(username: string, password: string) {
-  const result = await request<LoginResponse>("/auth/login", {
+  await request<LoginResponse>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
-  setAccessToken(result.token);
-  return result;
+  // Confirm that the cookie was accepted and use the canonical server-side
+  // identity. This also prevents treating a successful JSON response as a
+  // logged-in browser session when cookie delivery is misconfigured.
+  const user = await getCurrentUser();
+  return { user };
 }
 
 export async function getCurrentUser() {
@@ -30,9 +32,5 @@ export async function getCurrentUser() {
 }
 
 export async function logoutUser() {
-  try {
-    await request<{ ok: boolean }>("/auth/logout", { method: "POST" });
-  } finally {
-    clearAccessToken();
-  }
+  await request<{ ok: boolean }>("/auth/logout", { method: "POST" });
 }

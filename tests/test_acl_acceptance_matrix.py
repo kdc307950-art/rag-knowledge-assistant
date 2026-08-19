@@ -18,8 +18,8 @@ def test_acl_visibility_matrix_matches_release_contract():
     users = _users()
     documents = {
         "all.md": {"visibility": "all", "department": "general"},
-        "hr.md": {"visibility": "department", "department": "hr"},
-        "private.md": {"visibility": "private", "owner_id": "hr.viewer"},
+        "hr.md": {"visibility": "department", "department": "hr", "owner_id": "hr.editor"},
+        "private.md": {"visibility": "private", "department": "hr", "owner_id": "hr.viewer"},
     }
 
     assert [name for name, meta in documents.items() if document_visible_to_user(meta, users["hr.viewer"])] == [
@@ -48,8 +48,8 @@ def test_manifest_revision_filter_enforces_acl_before_retrieval(monkeypatch):
     class Manifest:
         metadata = {
             "all.md": {"visibility": "all", "department": "general", "authority_level": "authoritative", "retrieval_status": "active"},
-            "hr.md": {"visibility": "department", "department": "hr", "authority_level": "authoritative", "retrieval_status": "active"},
-            "private.md": {"visibility": "private", "owner_id": "hr.viewer", "authority_level": "authoritative", "retrieval_status": "active"},
+            "hr.md": {"visibility": "department", "department": "hr", "owner_id": "hr.editor", "authority_level": "authoritative", "retrieval_status": "active"},
+            "private.md": {"visibility": "private", "department": "hr", "owner_id": "hr.viewer", "authority_level": "authoritative", "retrieval_status": "active"},
         }
 
         def get_source_metadata(self, source):

@@ -13,7 +13,13 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 
-from enterprise_rag.config import LOG_BACKUP_COUNT, LOG_DIR, LOG_LEVEL, LOG_MAX_BYTES
+from enterprise_rag.config import (
+    LOG_BACKUP_COUNT,
+    LOG_DIR,
+    LOG_LEVEL,
+    LOG_MAX_BYTES,
+)
+from enterprise_rag import config as rag_config
 from enterprise_rag.services.diagnostics_service import build_diagnostics
 from enterprise_rag.utils.logger import setup_logger
 
@@ -51,6 +57,12 @@ async def lifespan(app: FastAPI):
         max_bytes=LOG_MAX_BYTES,
         backup_count=LOG_BACKUP_COUNT,
     )
+    if rag_config.RAG_ENVIRONMENT == "production":
+        auth = rag_config.auth_readiness()
+        if not auth.get("configured"):
+            raise RuntimeError(
+                f"生产环境安全门禁未通过: {auth.get('code', 'unknown')}"
+            )
     task = asyncio.create_task(_log_startup_diagnostics())
     app.state.startup_diagnostics_task = task
     try:

@@ -5,7 +5,14 @@ from fastapi import APIRouter, HTTPException, Request
 import hashlib
 
 from enterprise_rag.storage import vector_store
-from enterprise_rag.storage.acl import user_can_manage_documents
+from enterprise_rag.storage.vector_store import SourceMetadataReadError
+from enterprise_rag.core.exceptions import DocumentAuthorizationError, KnowledgeBaseBusyError
+from enterprise_rag.storage.acl import (
+    acl_summary,
+    can_clear_documents,
+    can_delete_document,
+    user_is_admin,
+)
 from enterprise_rag.utils.logger import log_audit_event
 from backend.observability.metrics import mark_kb_busy
 
@@ -19,28 +26,38 @@ async def list_documents(request: Request):
 
 @router.delete("/kb/documents/{source:path}")
 async def delete_document(source: str, request: Request):
-    if not user_can_manage_documents(getattr(request.state, "current_user", None)):
-        raise HTTPException(status_code=403, detail="当前账号没有管理文档权限")
-    if not vector_store.delete_document(source):
-        if getattr(vector_store, "is_knowledge_base_busy", lambda: False)():
-            mark_kb_busy("mutating")
-        raise HTTPException(status_code=404, detail="文档不存在或知识库正在更新")
+    user = getattr(request.state, "current_user", None)
+    try:
+        metadata = vector_store.delete_document_authorized(source, user)
+    except SourceMetadataReadError as exc:
+        raise HTTPException(status_code=503, detail="知识库元数据暂不可用，请稍后重试") from exc
+    except DocumentAuthorizationError as exc:
+        raise HTTPException(status_code=403, detail="当前账号不能删除此文档")
+    except KnowledgeBaseBusyError as exc:
+        mark_kb_busy("mutating")
+        raise HTTPException(status_code=409, detail="知识库正在更新，请稍后重试") from exc
+    if metadata is None:
+        raise HTTPException(status_code=404, detail="文档不存在")
     log_audit_event(
         "document_deleted",
         source_digest=hashlib.sha256(source.encode("utf-8")).hexdigest()[:12],
+        actor_id=(user or {}).get("id"),
+        actor_roles=(user or {}).get("roles", []),
+        acl_before=acl_summary(metadata),
     )
     return {"ok": True}
 
 
 @router.delete("/kb/clear")
 async def clear_documents(request: Request):
-    if not user_can_manage_documents(getattr(request.state, "current_user", None)):
-        raise HTTPException(status_code=403, detail="当前账号没有管理文档权限")
+    user = getattr(request.state, "current_user", None)
+    if not can_clear_documents(user):
+        raise HTTPException(status_code=403, detail="仅 admin 可以清空知识库")
     if not vector_store.clear_all_documents():
         if getattr(vector_store, "is_knowledge_base_busy", lambda: False)():
             mark_kb_busy("mutating")
         raise HTTPException(status_code=409, detail="知识库正在更新，请稍后重试")
-    log_audit_event("knowledge_base_cleared")
+    log_audit_event("knowledge_base_cleared", actor_id=(user or {}).get("id"), actor_roles=(user or {}).get("roles", []))
     return {"ok": True}
 
 
@@ -57,12 +74,13 @@ async def kb_stats(request: Request):
             "generation": None,
         }
     generation = None
-    try:
-        from enterprise_rag.storage.kb_manifest import get_manifest
+    if user_is_admin(access_context):
+        try:
+            from enterprise_rag.storage.kb_manifest import get_manifest
 
-        generation = get_manifest().snapshot().generation
-    except Exception:
-        generation = None
+            generation = get_manifest().snapshot().generation
+        except Exception:
+            generation = None
     return {
         "healthy": True,
         "vector_status": status,

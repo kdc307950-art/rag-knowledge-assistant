@@ -11,7 +11,7 @@ def test_users_login_me_logout_flow(monkeypatch, tmp_path):
     from enterprise_rag.auth.users import TokenManager, UserStore
 
     store = UserStore(tmp_path / "auth.sqlite3")
-    store.create_user("alice", "secret", display_name="Alice", department="hr")
+    alice = store.create_user("alice", "secret", display_name="Alice", department="hr")
     monkeypatch.setattr(auth, "AUTH_MODE", "users")
     monkeypatch.setattr(auth, "DEPLOYMENT_MODE", "multi_user")
     monkeypatch.setattr(auth, "AUTH_SECRET", "test-secret")
@@ -31,7 +31,8 @@ def test_users_login_me_logout_flow(monkeypatch, tmp_path):
             json={"username": "alice", "password": "secret"},
         )
         assert login.status_code == 200
-        token = login.json()["token"]
+        assert "token" not in login.json()
+        token = auth.get_token_manager().issue(alice)
         assert "rag_access=" in login.headers.get("set-cookie", "")
         cookie_me = client.get("/api/auth/me")
         assert cookie_me.status_code == 200

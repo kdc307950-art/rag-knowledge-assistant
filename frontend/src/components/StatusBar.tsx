@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { getDiagnostics, type Diagnostics } from "../api/health";
+import { getDiagnostics, getStats, type Diagnostics, type KbStats } from "../api/health";
+import { friendlyApiError } from "../api/client";
 import { useAuth } from "../store/auth";
 
 function modelLabel(state?: string) {
@@ -18,28 +19,39 @@ function costLabel(diagnostics: Diagnostics) {
 
 export default function StatusBar() {
   const logout = useAuth((s) => s.logout);
+  const user = useAuth((s) => s.user);
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
+  const [stats, setStats] = useState<KbStats | null>(null);
   const [status, setStatus] = useState("检查中...");
   const [tick, setTick] = useState(0);
+  const isAdmin = user?.roles.includes("admin") ?? false;
 
   useEffect(() => {
     let alive = true;
     setStatus("检查中...");
-    getDiagnostics()
-      .then((report) => {
+    setDiagnostics(null);
+    setStats(null);
+    const load = isAdmin
+      ? getDiagnostics().then((report) => {
         if (!alive) return;
         setDiagnostics(report);
         setStatus(report.ok ? "系统就绪" : "系统需要检查");
       })
-      .catch(() => {
+      : getStats().then((snapshot) => {
         if (!alive) return;
-        setDiagnostics(null);
-        setStatus("后端不可用");
+        setStats(snapshot);
+        setStatus(snapshot.healthy ? "系统就绪" : "知识库需要检查");
       });
+    load.catch((error: unknown) => {
+      if (!alive) return;
+      setDiagnostics(null);
+      setStats(null);
+      setStatus(friendlyApiError(error, "后端不可用"));
+    });
     return () => {
       alive = false;
     };
-  }, [tick]);
+  }, [isAdmin, tick]);
 
   useEffect(() => {
     const onKnowledgeChanged = () => setTick((value) => value + 1);
@@ -47,14 +59,19 @@ export default function StatusBar() {
     return () => window.removeEventListener("kb:changed", onKnowledgeChanged);
   }, []);
 
+  const documentCount = diagnostics?.kb.document_count ?? stats?.doc_count;
+  const chunkCount = diagnostics?.kb.chunk_count ?? stats?.chunk_count;
+  const generation = diagnostics?.kb.generation ?? stats?.generation;
+  const isHealthy = diagnostics?.ok ?? stats?.healthy;
+
   return (
     <header className="relative flex flex-wrap items-center justify-between gap-3 border-b bg-white px-4 py-2">
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-semibold">企业知识库助手</span>
-        <span className={"text-sm " + (diagnostics?.ok ? "text-green-700" : "text-amber-700")}>{status}</span>
-        {diagnostics && (
+        <span className={"text-sm " + (isHealthy ? "text-green-700" : "text-amber-700")}>{status}</span>
+        {documentCount !== undefined && (
           <span className="text-sm text-gray-500">
-            文档 {diagnostics.kb.document_count} · 分块 {diagnostics.kb.chunk_count} · 代际 {diagnostics.kb.generation ?? "-"}
+            文档 {documentCount} · 分块 {chunkCount ?? 0} · 代际 {generation ?? "-"}
           </span>
         )}
         {diagnostics && (

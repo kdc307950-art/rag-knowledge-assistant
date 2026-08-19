@@ -17,8 +17,19 @@ from ..config import (
     USE_HYBRID_SEARCH,
     VECTOR_WRITE_BATCH_SIZE,
 )
-from ..core.exceptions import DocumentException, DocumentGovernanceError, KnowledgeBaseBusyError
-from .acl import document_visible_to_user, normalize_acl_metadata
+from ..core.exceptions import (
+    DocumentAuthorizationError,
+    DocumentException,
+    DocumentGovernanceError,
+    KnowledgeBaseBusyError,
+)
+from .acl import (
+    can_create_document,
+    can_replace_document,
+    can_delete_document,
+    document_visible_to_user,
+    normalize_acl_metadata,
+)
 from ..storage.embedding import get_embedding_model
 from ..storage.document_governance import (
     metadata_for_source,
@@ -37,6 +48,29 @@ _bm25_dirty = True
 _batch_update_depth = 0
 _batch_mutated = False
 _destructive_mutation = False
+
+
+class SourceMetadataReadError(RuntimeError):
+    """The manifest could not be read, so mutation authorization is unknown."""
+
+
+def _upload_actor(metadata: dict | None) -> dict | None:
+    """Reconstruct the server-attached principal used by the worker recheck."""
+    if not metadata:
+        return None
+    principal_id = str(metadata.get("principal_id") or "").strip()
+    if not principal_id:
+        return None
+    raw_roles = metadata.get("principal_roles") or []
+    if isinstance(raw_roles, str):
+        roles = [item.strip() for item in raw_roles.split(",") if item.strip()]
+    else:
+        roles = [str(item).strip() for item in raw_roles if str(item).strip()]
+    return {
+        "id": principal_id,
+        "department": str(metadata.get("principal_department") or "").strip(),
+        "roles": roles,
+    }
 
 
 def _active_revision_filter(
@@ -370,8 +404,23 @@ def add_document_to_kb(
         acl_metadata = normalize_acl_metadata(metadata)
         combined_metadata = {**governance_metadata, **acl_metadata}
         active_source = manifest.get_source(file_name)
+        existing_metadata = (
+            manifest.get_source_metadata(file_name) if active_source else None
+        )
+        actor = _upload_actor(metadata)
+        if actor is not None:
+            allowed = (
+                can_replace_document(actor, existing_metadata)
+                and can_create_document(actor, combined_metadata)
+                if active_source
+                else can_create_document(actor, combined_metadata)
+            )
+            if not allowed:
+                raise DocumentAuthorizationError(
+                    f"当前账号不能创建或替换文档：{file_name}"
+                )
         if active_source and active_source.get("content_hash") == content_hash and (
-            manifest.get_source_metadata(file_name) or {}
+            existing_metadata or {}
         ) == combined_metadata:
             logger.info("文件 %s 内容未变，跳过更新", file_name)
             return "skipped"
@@ -533,19 +582,44 @@ def add_document_to_kb(
         return "added"
 
 
-def delete_document(file_name: str) -> bool:
+def delete_document_authorized(
+    file_name: str,
+    access_context: dict | None = None,
+) -> dict | None:
+    """Atomically authorize and delete one source.
+
+    The manifest metadata used for authorization and the logical/physical
+    deletion are protected by the same mutation gate and vector lock.  This
+    closes the window where a caller could be authorized against one ACL
+    snapshot and delete a later revision with different ownership.
+
+    ``None`` means the source was not active when the mutation lock was
+    acquired.  The returned mapping is the exact ACL snapshot used for the
+    authorization decision and is suitable for audit logging.
+    """
     global _bm25_dirty
     if not _try_begin_destructive_mutation():
         logger.warning("知识库正在更新，拒绝删除文件: %s", file_name)
-        return False
+        raise KnowledgeBaseBusyError("知识库正在更新")
     try:
         with _VECTOR_LOCK:
             collection = get_kb_collection()
             manifest = get_manifest()
             _ensure_manifest_initialized(collection)
             active = manifest.get_source(file_name)
-            if not active:
-                return False
+            if active is None:
+                return None
+            try:
+                metadata = manifest.get_source_metadata(file_name)
+            except Exception as exc:
+                raise SourceMetadataReadError("知识库元数据暂不可用") from exc
+            metadata = dict(metadata or {})
+            if access_context is not None and not can_delete_document(
+                access_context, metadata
+            ):
+                raise DocumentAuthorizationError(
+                    f"当前账号不能删除文档：{file_name}"
+                )
             manifest.delete_source(file_name)
             old_data = collection.get(where={"revision_id": active["active_revision"]})
             old_ids = old_data.get("ids", [])
@@ -555,12 +629,24 @@ def delete_document(file_name: str) -> bool:
                 except Exception:
                     logger.exception("来源已逻辑删除，但物理分块清理失败: %s", file_name)
             _refresh_indexes_after_mutation(collection)
-            return True
+            return metadata
+    finally:
+        _end_destructive_mutation()
+
+
+def delete_document(file_name: str) -> bool:
+    """Backward-compatible internal deletion helper.
+
+    Callers that have an authenticated principal must use
+    :func:`delete_document_authorized`; this wrapper intentionally preserves
+    the historical bool/error-swallowing contract for internal maintenance
+    and existing tests.
+    """
+    try:
+        return delete_document_authorized(file_name) is not None
     except Exception as exc:
         logger.error("删除文件失败 %s: %s", file_name, exc, exc_info=True)
         return False
-    finally:
-        _end_destructive_mutation()
 
 
 def clear_all_documents() -> bool:
@@ -635,6 +721,24 @@ def get_doc_count(access_context: dict | None = None) -> int:
 def get_document_count(access_context: dict | None = None) -> int:
     """返回按来源去重后的真实文档数量。"""
     return len(list_documents(access_context))
+
+
+def get_source_metadata(file_name: str) -> dict | None:
+    """Return ACL metadata, distinguishing a missing source from legacy ACL.
+
+    ``{}`` means the source exists but predates ACL metadata and must be
+    fail-closed for non-admin mutations. ``None`` means the source does not
+    exist and can therefore be uploaded as a new document.
+    """
+    with _VECTOR_LOCK:
+        try:
+            manifest = get_manifest()
+            if manifest.get_source(file_name) is None:
+                return None
+            return manifest.get_source_metadata(file_name)
+        except Exception as exc:
+            logger.exception("获取来源元数据失败: %s", file_name)
+            raise SourceMetadataReadError("知识库元数据暂不可用") from exc
 
 
 def update_doc_count() -> None:

@@ -19,7 +19,7 @@ from enterprise_rag.services.chat_service import ChatService
 from enterprise_rag.services.rag_service import RagService, _general_failure_details
 
 from ..schemas import ChatRequest, DraftRequest, GeneralRequest
-from ..session import append_message, get_messages, get_or_create_session_id
+from ..session import SessionOwnershipError, append_message, get_messages, get_or_create_session_id
 from ..sse import sse
 from ..observability.context import get_request_telemetry, mark_sse_terminal
 from enterprise_rag.services.quality_service import DuplicateRunError, get_quality_service
@@ -254,7 +254,13 @@ async def chat(
     else:
         message_id = str(uuid4())
     rag = RagService()
-    session_id = get_or_create_session_id(x_session_id or req.session_id)
+    try:
+        session_id = get_or_create_session_id(
+            x_session_id or req.session_id,
+            principal_id=str((getattr(request.state, "current_user", None) or {}).get("id") or "local"),
+        )
+    except SessionOwnershipError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     messages = get_messages(session_id)
     history = _select_history(req.query, messages)
     collected: list[str] = []

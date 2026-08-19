@@ -265,6 +265,15 @@ class RagService:
         if not decision.has_results:
             yield self.reject(decision.query)
             return
+        # Multi-user deployments disable shared answer caching until cache keys
+        # carry a complete ACL visibility snapshot. Older extension/test cache
+        # adapters predate this flag, so their absence means "enabled".
+        cache_enabled = bool(getattr(self.cache_service, "enabled", True))
+        if not cache_enabled:
+            self._last_meta = {
+                **getattr(self, "_last_meta", {}),
+                "cache_disabled": True,
+            }
 
         # 检索结束后若知识库已切换代际，本次上下文不再是当前稳定快照。
         # 此时不读取旧代际缓存，也不继续用过期资料生成答案。
@@ -286,21 +295,25 @@ class RagService:
             return
 
         # 缓存键包含改写后的查询和历史摘要，避免不同上下文误命中同一答案。
-        cache_key = self.cache_service.make_key(
-            decision.retrieval_query,
-            decision.history_summary,
-            original_query=decision.query,
-            mode=mode,
-            kb_generation=decision.kb_generation,
-        )
-        if decision.kb_generation is None:
-            # 兼容不返回代际的测试替身与旧扩展实现；生产检索始终返回 manifest generation。
-            cached = self.cache_service.get(cache_key)
-        else:
-            cached = self.cache_service.get(
-                cache_key,
-                expected_generation=decision.kb_generation,
+        # Disabled caching must not invoke adapter make/get/set hooks at all.
+        cache_key: str | None = None
+        cached = None
+        if cache_enabled:
+            cache_key = self.cache_service.make_key(
+                decision.retrieval_query,
+                decision.history_summary,
+                original_query=decision.query,
+                mode=mode,
+                kb_generation=decision.kb_generation,
             )
+            if decision.kb_generation is None:
+                # 兼容不返回代际的测试替身与旧扩展实现；生产检索始终返回 manifest generation。
+                cached = self.cache_service.get(cache_key)
+            else:
+                cached = self.cache_service.get(
+                    cache_key,
+                    expected_generation=decision.kb_generation,
+                )
         if cached:
             # ``CacheService.get`` 已执行读前/读后校验；这里再做最后一层
             # 复核，兼容第三方缓存适配器，确保 yield 前不返回旧代际答案。
@@ -401,7 +414,7 @@ class RagService:
             decision.kb_generation is None
             or self.cache_service.get_generation() == decision.kb_generation
         )
-        if generation_unchanged:
+        if generation_unchanged and cache_enabled and cache_key is not None:
             try:
                 if decision.kb_generation is None:
                     cache_written = self.cache_service.set(
@@ -440,6 +453,7 @@ class RagService:
             "retrieval_query": decision.retrieval_query,
             "draft_allowed": mode == "rag" and DRAFT_ENABLED,
             "from_cache": False,
+            "cache_disabled": not cache_enabled,
             "cache_skipped_generation_changed": not generation_unchanged,
         }
 

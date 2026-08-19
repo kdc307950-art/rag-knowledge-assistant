@@ -123,3 +123,57 @@ def test_rag_cache_hit_rechecks_generation_before_yield():
     assert visible == "知识库刚刚完成更新，请重新提交问题以使用最新资料。"
     assert service._last_meta["is_kb_stale"] is True
     assert service._last_meta.get("from_cache") is not True
+
+
+def test_rag_does_not_call_cache_adapter_when_cache_is_disabled(monkeypatch):
+    """Disabled multi-user caching must not read, write, or create cache keys."""
+    from enterprise_rag.services import rag_service
+
+    decision = rag_service.RetrievalDecision(
+        query="问题",
+        retrieval_query="问题",
+        context="资料",
+        sources=["manual.txt"],
+        raw_results=[{"rerank_score": 0.9}],
+        history_summary="",
+        kb_generation=7,
+    )
+
+    class DisabledCache:
+        enabled = False
+
+        def get_generation(self):
+            return 7
+
+        def make_key(self, *_args, **_kwargs):
+            raise AssertionError("disabled cache must not make a key")
+
+        def get(self, *_args, **_kwargs):
+            raise AssertionError("disabled cache must not read")
+
+        def set(self, *_args, **_kwargs):
+            raise AssertionError("disabled cache must not write")
+
+    monkeypatch.setattr(rag_service, "generate_answer_stream", lambda *_args, **_kwargs: iter(["回答"]))
+    service = rag_service.RagService()
+    service.cache_service = DisabledCache()
+
+    assert "".join(service._stream_from_decision(decision, template="{context}", mode="rag")) == "回答"
+    assert service._last_meta["cache_disabled"] is True
+
+
+def test_multi_user_does_not_construct_persistent_answer_cache(monkeypatch):
+    """Multi-user mode must have no SQLite answer-cache adapter at all."""
+    from enterprise_rag.services import cache_service
+
+    monkeypatch.setattr(cache_service, "DEPLOYMENT_MODE", "multi_user")
+    monkeypatch.setattr(cache_service, "ANSWER_CACHE_ENABLED", True)
+
+    def unexpected_cache(*_args, **_kwargs):
+        raise AssertionError("multi-user mode must not construct answer cache")
+
+    monkeypatch.setattr(cache_service, "PersistentAnswerCache", unexpected_cache)
+    service = cache_service.CacheService()
+
+    assert service.enabled is False
+    assert service.persistent_cache is None

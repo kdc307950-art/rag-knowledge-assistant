@@ -16,6 +16,7 @@ from enterprise_rag.config import (
     AUTH_SECRET,
     AUTH_TOKEN_TTL_SECONDS,
     DEPLOYMENT_MODE,
+    production_security_error,
 )
 from enterprise_rag.utils.logger import log_audit_event
 
@@ -34,6 +35,9 @@ class LoginRequest(BaseModel):
 
 
 def _ensure_users_mode() -> None:
+    production_error = production_security_error()
+    if production_error:
+        raise HTTPException(status_code=503, detail=production_error)
     if DEPLOYMENT_MODE != "multi_user" or AUTH_MODE != "users":
         raise HTTPException(status_code=404, detail="用户登录未启用")
     if not AUTH_SECRET.strip():
@@ -90,7 +94,11 @@ async def login(request: Request, response: Response, payload: LoginRequest):
         path="/",
     )
     log_audit_event("auth_login_success", user_id=user["id"], username=user["username"])
-    return {"token": token, "expires_in": get_token_manager().ttl_seconds, "user": user}
+    # Browser clients authenticate exclusively with the HttpOnly cookie. Do
+    # not put the bearer credential into a JSON body where application code or
+    # an injected script could persist it. Controlled script credentials, if
+    # needed later, must use a separately reviewed issuance flow.
+    return {"expires_in": get_token_manager().ttl_seconds, "user": user}
 
 
 @router.get("/auth/me")

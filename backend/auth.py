@@ -5,6 +5,7 @@ import hmac
 import ipaddress
 import threading
 import time
+from urllib.parse import urlsplit
 
 from fastapi import Header, HTTPException, Request
 
@@ -18,6 +19,7 @@ from enterprise_rag.config import (
     AUTH_TOKEN_TTL_SECONDS,
     DEPLOYMENT_MODE,
 )
+from enterprise_rag import config as rag_config
 from enterprise_rag.utils.logger import log_audit_event
 
 from .observability.context import get_request_telemetry
@@ -83,6 +85,25 @@ def _client_scope(request: Request) -> str:
     return "unknown"
 
 
+def _cookie_origin_is_allowed(request: Request) -> bool:
+    """Require a same-origin browser request before using a production cookie.
+
+    SameSite=Lax handles most cross-site requests, but it is not a complete
+    CSRF boundary for same-site subdomains. Bearer-authenticated automation is
+    deliberately exempt because it never relies on the browser cookie.
+    """
+    if rag_config.RAG_ENVIRONMENT != "production" or request.method.upper() in {
+        "GET",
+        "HEAD",
+        "OPTIONS",
+    }:
+        return True
+    origin = str(request.headers.get("origin") or "").strip().rstrip("/")
+    parsed = urlsplit(rag_config.PUBLIC_BASE_URL)
+    expected = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    return bool(origin and expected and hmac.compare_digest(origin, expected))
+
+
 def _should_audit_auth_failure(
     client_scope: str,
     route: str,
@@ -111,6 +132,14 @@ async def require_access(
     x_api_key: str | None = Header(default=None),
     authorization: str | None = Header(default=None),
 ) -> None:
+    # Direct unit callers may pass FastAPI's Header sentinel; treat it as absent.
+    if not isinstance(authorization, str):
+        authorization = None
+    if not isinstance(x_api_key, str):
+        x_api_key = None
+    production_error = rag_config.production_security_error()
+    if production_error:
+        raise HTTPException(status_code=503, detail=production_error)
     if DEPLOYMENT_MODE == "multi_user" and (
         AUTH_MODE != "users" or not AUTH_SECRET.strip()
     ):
@@ -133,8 +162,9 @@ async def require_access(
 
     if DEPLOYMENT_MODE == "multi_user":
         bearer = authorization[7:].strip() if authorization and authorization.lower().startswith("bearer ") else ""
-        cookie_token = request.cookies.get(AUTH_COOKIE_NAME, "").strip()
-        for token in (bearer, cookie_token):
+        cookies = getattr(request, "cookies", {}) or {}
+        cookie_token = str(cookies.get(AUTH_COOKIE_NAME, "") or "").strip()
+        for credential_type, token in (("bearer", bearer), ("cookie", cookie_token)):
             if not token:
                 continue
             try:
@@ -145,19 +175,10 @@ async def require_access(
                 user = None
                 claims = None
             if user and user.get("active"):
+                if credential_type == "cookie" and not _cookie_origin_is_allowed(request):
+                    raise HTTPException(status_code=403, detail="Cookie 请求来源不受信任")
                 _set_auth_state(request, user=user, token=token, claims=claims)
                 return
-        if APP_PASSWORD and x_api_key and hmac.compare_digest(x_api_key, APP_PASSWORD):
-            _set_auth_state(
-                request,
-                user={
-                    "id": "service-admin",
-                    "username": "admin",
-                    "roles": ["admin"],
-                    "department": "general",
-                },
-            )
-            return
     if DEPLOYMENT_MODE == "single_user" and x_api_key and hmac.compare_digest(x_api_key, APP_PASSWORD):
         _set_auth_state(
             request,

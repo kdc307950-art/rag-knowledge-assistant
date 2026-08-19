@@ -193,3 +193,66 @@ def test_diagnostics_route_uses_api_authentication(monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == report
+
+
+def test_diagnostics_route_enforces_multi_user_admin_role(monkeypatch, tmp_path):
+    """The global diagnostics endpoint is authenticated and admin-only."""
+
+    from backend import auth, main
+    from backend.api import auth as auth_api
+    from backend.api import diagnostics as diagnostics_api
+    from enterprise_rag import config
+    from enterprise_rag.auth.users import TokenManager, UserStore
+
+    report = {
+        "ok": True,
+        "checked_at": "2026-08-19T00:00:00+00:00",
+        "checks": {},
+        "kb": {"document_count": 0, "chunk_count": 0, "generation": 0},
+        "errors": {"count": 0, "recent": [], "truncated": False},
+    }
+    secret = "A9f4xQ2mL7pR5vT8zK3nW6cH1sD0eY4u"
+    store = UserStore(tmp_path / "auth.sqlite3")
+    viewer = store.create_user(
+        "viewer", "secret", department="hr", roles=["viewer"]
+    )
+    editor = store.create_user(
+        "editor", "secret", department="hr", roles=["editor"]
+    )
+    admin = store.create_user(
+        "admin", "secret", department="general", roles=["admin"]
+    )
+    manager = TokenManager(secret=secret, ttl_seconds=3600)
+
+    # Keep this test independent of the developer's process environment and of
+    # the startup diagnostics implementation.
+    monkeypatch.setattr(config, "RAG_ENVIRONMENT", "development")
+    monkeypatch.setattr(auth, "DEPLOYMENT_MODE", "multi_user")
+    monkeypatch.setattr(auth, "AUTH_MODE", "users")
+    monkeypatch.setattr(auth, "AUTH_SECRET", secret)
+    monkeypatch.setattr(auth, "_USER_STORE", store)
+    monkeypatch.setattr(auth, "_TOKEN_MANAGER", manager)
+    monkeypatch.setattr(auth_api, "DEPLOYMENT_MODE", "multi_user")
+    monkeypatch.setattr(auth_api, "AUTH_MODE", "users")
+    monkeypatch.setattr(auth_api, "AUTH_SECRET", secret)
+    monkeypatch.setattr(diagnostics_api, "build_diagnostics", lambda: report)
+    monkeypatch.setattr(main, "build_diagnostics", lambda: report)
+
+    def request_with(user):
+        token = manager.issue(user)
+        return {"Authorization": f"Bearer {token}"}
+
+    with TestClient(main.app) as client:
+        assert client.get("/api/diagnostics").status_code == 401
+        assert client.get(
+            "/api/diagnostics", headers=request_with(viewer)
+        ).status_code == 403
+        assert client.get(
+            "/api/diagnostics", headers=request_with(editor)
+        ).status_code == 403
+        admin_response = client.get(
+            "/api/diagnostics", headers=request_with(admin)
+        )
+
+    assert admin_response.status_code == 200
+    assert admin_response.json() == report

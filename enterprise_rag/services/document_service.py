@@ -51,6 +51,23 @@ _UPLOAD_SLOTS = threading.BoundedSemaphore(UPLOAD_QUEUE_CAPACITY)
 _UPLOAD_FUTURES: dict[str, Future] = {}
 
 
+def _access_context_from_upload_metadata(metadata: dict | None) -> dict | None:
+    """Build an ACL context for task-visible counters without trusting clients."""
+    if not metadata or not str(metadata.get("principal_id") or "").strip():
+        return None
+    raw_roles = metadata.get("principal_roles") or ""
+    roles = (
+        [item.strip() for item in raw_roles.split(",") if item.strip()]
+        if isinstance(raw_roles, str)
+        else [str(item).strip() for item in raw_roles if str(item).strip()]
+    )
+    return {
+        "id": str(metadata.get("principal_id") or "").strip(),
+        "department": str(metadata.get("principal_department") or "").strip(),
+        "roles": roles,
+    }
+
+
 def _set_upload_task(task_id: str, task_info: dict) -> None:
     with _UPLOAD_TASKS_LOCK:
         current = dict(_UPLOAD_TASKS.get(task_id, {}))
@@ -253,6 +270,9 @@ def _upload_worker(
             "stage": "parsing",
             "progress": 2,
             "message": f"正在并行解析 0/{total}...",
+            "principal_id": str((metadata or {}).get("principal_id") or ""),
+            "principal_roles": str((metadata or {}).get("principal_roles") or ""),
+            "principal_department": str((metadata or {}).get("principal_department") or ""),
         },
     )
 
@@ -370,8 +390,9 @@ def _upload_worker(
             fail_list.append("上传暂存目录清理失败，系统将在后续任务中重试")
 
         try:
-            doc_count = get_document_count()
-            chunk_count = get_doc_count()
+            access_context = _access_context_from_upload_metadata(metadata)
+            doc_count = get_document_count(access_context)
+            chunk_count = get_doc_count(access_context)
         except Exception:
             logger.exception("上传任务完成后读取知识库统计失败")
             doc_count = None
@@ -409,6 +430,15 @@ def _upload_worker(
             added_count=added_count,
             skipped_count=skipped_count,
             failed_count=len(fail_list),
+            actor_id=str((metadata or {}).get("principal_id") or ""),
+            actor_roles=str((metadata or {}).get("principal_roles") or ""),
+            actor_department=str((metadata or {}).get("principal_department") or ""),
+            acl_after={
+                "classification": str((metadata or {}).get("classification") or ""),
+                "department": str((metadata or {}).get("department") or ""),
+                "visibility": str((metadata or {}).get("visibility") or ""),
+            },
+            request_id=str((metadata or {}).get("request_id") or ""),
         )
 
         phase_seconds["total"] = time.perf_counter() - task_started
@@ -541,6 +571,9 @@ class DocumentService:
                     "file_count": len(total_files),
                     "total_bytes": total_bytes,
                     "message": "正在将上传内容暂存到磁盘...",
+                    "principal_id": str((metadata or {}).get("principal_id") or ""),
+                    "principal_roles": str((metadata or {}).get("principal_roles") or ""),
+                    "principal_department": str((metadata or {}).get("principal_department") or ""),
                 },
             )
             task_registered = True

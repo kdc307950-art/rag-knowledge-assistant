@@ -11,6 +11,8 @@ from collections.abc import Callable
 from ..core.constants import MAX_CACHE_SIZE
 from ..config import (
     ANSWER_CACHE_TTL_SECONDS,
+    ANSWER_CACHE_ENABLED,
+    DEPLOYMENT_MODE,
     KB_DATA_DIR,
     MODEL_VERSION,
     PROMPT_VERSION,
@@ -47,9 +49,19 @@ class CacheService:
         manifest: KnowledgeBaseManifest | None = None,
         generation_reader: Callable[[], int] | None = None,
     ):
-        self.persistent_cache = persistent_cache or PersistentAnswerCache(
-            max_entries=MAX_CACHE_SIZE,
-            ttl_seconds=ANSWER_CACHE_TTL_SECONDS,
+        # Do not even construct the SQLite adapter for multi-user deployments.
+        # Shared answers remain unsafe until cache keys contain a full ACL
+        # visibility snapshot; disabled means no L1 or L2 cache boundary.
+        self.enabled = bool(
+            ANSWER_CACHE_ENABLED and DEPLOYMENT_MODE in {"dev", "single_user"}
+        )
+        self.persistent_cache = (
+            (persistent_cache or PersistentAnswerCache(
+                max_entries=MAX_CACHE_SIZE,
+                ttl_seconds=ANSWER_CACHE_TTL_SECONDS,
+            ))
+            if self.enabled
+            else None
         )
         self.manifest = manifest
         # 测试或外部适配层可传入同一事务快照的读取函数；生产默认读取 manifest。
@@ -110,6 +122,8 @@ class CacheService:
 
     def get(self, key, *, expected_generation: int | None = None):
         """优先读取进程级 L1 缓存，未命中时回源 SQLite 并回填 L1。"""
+        if not self.enabled:
+            return None
         if expected_generation is not None and self.get_generation() != expected_generation:
             _record_cache(False, "l1")
             return None
@@ -128,7 +142,10 @@ class CacheService:
 
         _record_cache(False, "l1")
 
-        value = self.persistent_cache.get(key)
+        persistent_cache = self.persistent_cache
+        if persistent_cache is None:
+            return None
+        value = persistent_cache.get(key)
         if value is not None:
             if expected_generation is not None and self.get_generation() != expected_generation:
                 return None
@@ -142,14 +159,21 @@ class CacheService:
 
     def set(self, key, value, *, expected_generation: int | None = None) -> bool:
         """先写进程级 L1，再尽力持久化；L2 失败不影响正常回答。"""
+        if not self.enabled:
+            return False
         if expected_generation is not None and self.get_generation() != expected_generation:
             return False
         with _l1_lock:
             _l1_cache.pop(key, None)
             _l1_cache[key] = value
             self._trim_session_cache(_l1_cache)
+        persistent_cache = self.persistent_cache
+        if persistent_cache is None:
+            with _l1_lock:
+                _l1_cache.pop(key, None)
+            return False
         try:
-            self.persistent_cache.set(key, value)
+            persistent_cache.set(key, value)
         except Exception:
             # 持久化缓存只是性能优化，不是生成回答的前置条件。
             logger.exception("持久化回答缓存写入失败")
@@ -162,7 +186,7 @@ class CacheService:
             # 写入期间知识库已提交新版本。虽然新代际会生成不同键，仍主动
             # 删除旧 L2 项，避免未来错误回退到旧代际时重新暴露过期答案。
             try:
-                self.persistent_cache.delete(key)
+                persistent_cache.delete(key)
             except Exception:
                 logger.exception("知识库代际变化后清理旧回答缓存失败")
             return False

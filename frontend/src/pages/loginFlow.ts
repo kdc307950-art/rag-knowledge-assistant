@@ -1,35 +1,32 @@
 import { ApiError } from "../api/client";
 import { loginUser } from "../api/auth";
-import { getHealth } from "../api/health";
+import type { AuthUser } from "../api/auth";
 
 interface LoginActions {
-  prepareLogin: (password: string) => void;
-  completeLogin: () => void;
-  logout: () => void;
-  loginUser?: (token: string, user: Awaited<ReturnType<typeof loginUser>>["user"]) => void;
+  clearAuth: () => void;
+  loginUser: (user: AuthUser) => void;
 }
 
 export async function verifyLogin(
   password: string,
-  { prepareLogin, completeLogin, logout, loginUser: saveUser }: LoginActions,
+  { clearAuth, loginUser: saveUser }: LoginActions,
   username = "",
 ): Promise<string> {
   try {
-    if (username.trim()) {
-      const result = await loginUser(username.trim(), password);
-      saveUser?.(result.token, result.user);
-      completeLogin();
-      return "";
+    const normalizedUsername = username.trim();
+    if (!normalizedUsername || !password) {
+      return "请输入用户名和密码";
     }
-    // client.ts reads the persisted credential when the health request is sent.
-    prepareLogin(password);
-    await getHealth();
-    completeLogin();
+    const result = await loginUser(normalizedUsername, password);
+    saveUser(result.user);
     return "";
   } catch (error) {
-    logout();
+    clearAuth();
     if (error instanceof ApiError && error.status === 401) {
-      return "访问口令错误";
+      return "用户名或密码错误";
+    }
+    if (error instanceof ApiError && error.status === 429) {
+      return "登录尝试过于频繁，请稍后重试";
     }
     if (error instanceof ApiError) {
       return `后端错误：${error.message}`;

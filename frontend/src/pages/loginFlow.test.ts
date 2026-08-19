@@ -1,89 +1,54 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
-import { getHealth } from "../api/health";
+import { loginUser } from "../api/auth";
 import { verifyLogin } from "./loginFlow";
 
-vi.mock("../api/auth", () => ({
-  loginUser: vi.fn(),
-}));
-import { loginUser } from "../api/auth";
+vi.mock("../api/auth", () => ({ loginUser: vi.fn() }));
 
-vi.mock("../api/health", () => ({
-  getHealth: vi.fn(),
-}));
-
-const getHealthMock = vi.mocked(getHealth);
 const loginUserMock = vi.mocked(loginUser);
+const user = { id: 1, username: "alice", department: "hr", roles: ["viewer"], active: true };
 
-afterEach(() => {
-  vi.clearAllMocks();
-});
+afterEach(() => vi.clearAllMocks());
 
 describe("login verification", () => {
-  it("uses the multi-user login endpoint and keeps the token out of browser storage", async () => {
-    const completeLogin = vi.fn();
+  it("uses username/password login and stores the cookie-backed identity", async () => {
     const saveUser = vi.fn();
-    loginUserMock.mockResolvedValue({
-      token: "memory-token",
-      expires_in: 3600,
-      user: { id: 1, username: "alice", department: "hr", roles: ["viewer"], active: true },
-    });
+    const clearAuth = vi.fn();
+    loginUserMock.mockResolvedValue({ user });
 
-    await expect(
-      verifyLogin("secret", {
-        prepareLogin: vi.fn(),
-        completeLogin,
-        logout: vi.fn(),
-        loginUser: saveUser,
-      }, "alice"),
-    ).resolves.toBe("");
-
+    await expect(verifyLogin("secret", { clearAuth, loginUser: saveUser }, "alice")).resolves.toBe("");
     expect(loginUserMock).toHaveBeenCalledWith("alice", "secret");
-    expect(saveUser).toHaveBeenCalledWith("memory-token", expect.objectContaining({ username: "alice" }));
-    expect(completeLogin).toHaveBeenCalledOnce();
-    expect(getHealthMock).not.toHaveBeenCalled();
+    expect(saveUser).toHaveBeenCalledWith(user);
+    expect(clearAuth).not.toHaveBeenCalled();
   });
 
-  it("persists the submitted credential before checking backend health", async () => {
-    const calls: string[] = [];
-    const prepareLogin = vi.fn(() => calls.push("prepare"));
-    const completeLogin = vi.fn(() => calls.push("complete"));
-    const logout = vi.fn();
-    getHealthMock.mockImplementation(async () => {
-      calls.push("health");
-      return { ok: true, vector_status: "ready" };
-    });
-
-    await expect(verifyLogin(" test-key ", { prepareLogin, completeLogin, logout })).resolves.toBe("");
-
-    expect(prepareLogin).toHaveBeenCalledWith(" test-key ");
-    expect(completeLogin).toHaveBeenCalledOnce();
-    expect(calls).toEqual(["prepare", "health", "complete"]);
-    expect(logout).not.toHaveBeenCalled();
+  it("requires a username and password", async () => {
+    const saveUser = vi.fn();
+    await expect(verifyLogin("", { clearAuth: vi.fn(), loginUser: saveUser }, "alice"))
+      .resolves.toBe("请输入用户名和密码");
+    expect(saveUser).not.toHaveBeenCalled();
   });
 
-  it("rolls back authentication and shows a specific message for a rejected key", async () => {
-    const prepareLogin = vi.fn();
-    const completeLogin = vi.fn();
-    const logout = vi.fn();
-    getHealthMock.mockRejectedValue(new ApiError(401, "unauthorized"));
+  it("distinguishes rejected credentials and rate limits", async () => {
+    const clearAuth = vi.fn();
+    loginUserMock.mockRejectedValueOnce(new ApiError(401, "用户名或密码错误"));
+    await expect(verifyLogin("bad", { clearAuth, loginUser: vi.fn() }, "alice"))
+      .resolves.toBe("用户名或密码错误");
+    expect(clearAuth).toHaveBeenCalledOnce();
 
-    await expect(verifyLogin("bad-key", { prepareLogin, completeLogin, logout })).resolves.toBe("访问口令错误");
-
-    expect(logout).toHaveBeenCalledOnce();
-    expect(completeLogin).not.toHaveBeenCalled();
+    loginUserMock.mockRejectedValueOnce(new ApiError(429, "登录尝试过于频繁"));
+    await expect(verifyLogin("bad", { clearAuth, loginUser: vi.fn() }, "alice"))
+      .resolves.toBe("登录尝试过于频繁，请稍后重试");
   });
 
-  it("distinguishes backend errors from connection failures", async () => {
-    const prepareLogin = vi.fn();
-    const completeLogin = vi.fn();
-    const logout = vi.fn();
-    getHealthMock.mockRejectedValueOnce(new ApiError(503, "服务未就绪"));
+  it("shows service readiness and connection errors separately", async () => {
+    const clearAuth = vi.fn();
+    loginUserMock.mockRejectedValueOnce(new ApiError(503, "服务未就绪"));
+    await expect(verifyLogin("key", { clearAuth, loginUser: vi.fn() }, "alice"))
+      .resolves.toBe("后端错误：服务未就绪");
 
-    await expect(verifyLogin("key", { prepareLogin, completeLogin, logout })).resolves.toBe("后端错误：服务未就绪");
-
-    getHealthMock.mockRejectedValueOnce(new TypeError("fetch failed"));
-    await expect(verifyLogin("key", { prepareLogin, completeLogin, logout })).resolves.toContain("无法连接后端服务");
-    expect(logout).toHaveBeenCalledTimes(2);
+    loginUserMock.mockRejectedValueOnce(new TypeError("fetch failed"));
+    await expect(verifyLogin("key", { clearAuth, loginUser: vi.fn() }, "alice"))
+      .resolves.toContain("无法连接后端服务");
   });
 });

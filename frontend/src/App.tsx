@@ -7,19 +7,25 @@ import { useAuth } from "./store/auth";
 
 export default function App() {
   const isAuthenticated = useAuth((s) => s.isAuthenticated);
-  const logout = useAuth((s) => s.logout);
+  const clearAuth = useAuth((s) => s.clearAuth);
   const restoreSession = useAuth((s) => s.restoreSession);
+  const restoring = useAuth((s) => s.restoring);
 
   useEffect(() => {
     void restoreSession();
   }, [restoreSession]);
 
   useEffect(() => {
-    const onLogout = () => logout();
+    // apiFetch emits this event after a 401. Do not call /auth/logout again:
+    // the cookie may already be invalid and the extra request can recurse.
+    const onLogout = () => clearAuth();
     window.addEventListener("auth:logout", onLogout);
     return () => window.removeEventListener("auth:logout", onLogout);
-  }, [logout]);
+  }, [clearAuth]);
 
+  if (restoring) {
+    return <div className="flex min-h-dvh items-center justify-center bg-gray-50 text-sm text-gray-500">正在恢复登录状态...</div>;
+  }
   if (!isAuthenticated) {
     return <Login />;
   }

@@ -3,6 +3,7 @@ import hashlib
 import logging
 import math
 import os
+import secrets
 from pathlib import Path
 
 
@@ -99,6 +100,9 @@ AUTH_MODE = os.getenv("AUTH_MODE", "legacy").strip().lower()
 if AUTH_MODE not in {"legacy", "users"}:
     AUTH_MODE = "legacy"
 DEPLOYMENT_MODE = os.getenv("DEPLOYMENT_MODE", "dev").strip().lower()
+# Shared answer caches are unsafe until their key includes the complete ACL
+# visibility snapshot.  Multi-user therefore defaults to fail-closed caching.
+ANSWER_CACHE_ENABLED = os.getenv("ANSWER_CACHE_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
 AUTH_DB_PATH = Path(
     os.getenv("AUTH_DB_PATH", str(RUNTIME_DATA_DIR / "auth.sqlite3"))
 ).expanduser()
@@ -110,6 +114,8 @@ AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "rag_access")
 AUTH_COOKIE_SECURE = os.getenv("AUTH_COOKIE_SECURE", "0").strip().lower() in {
     "1", "true", "yes", "on"
 }
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://127.0.0.1:8000").strip().rstrip("/")
+RAG_ENVIRONMENT = os.getenv("RAG_ENVIRONMENT", "development").strip().lower()
 
 # Quality feedback capture is opt-in because it stores encrypted query/answer
 # material for a bounded retention window.  The key must be supplied by the
@@ -135,6 +141,22 @@ QUALITY_FEEDBACK_LIMIT_PER_HOUR = max(
 )
 
 
+def _production_secret_error(secret: str) -> str | None:
+    """Reject obvious low-entropy production secrets without pretending to measure entropy."""
+    value = str(secret or "")
+    if len(value.encode("utf-8")) < 32:
+        return "AUTH_SECRET 必须至少 32 字节"
+    lowered = value.strip().lower()
+    if lowered in {"change-me", "changeme", "secret", "test-secret", "password"}:
+        return "AUTH_SECRET 不能使用默认或测试口令"
+    if len(set(value)) < 8:
+        return "AUTH_SECRET 字符多样性不足"
+    for width in range(1, min(8, len(value) // 2 + 1)):
+        if len(value) % width == 0 and value == value[:width] * (len(value) // width):
+            return "AUTH_SECRET 不能是重复模式"
+    return None
+
+
 def _require_runtime_data_path(name: str, path: Path) -> Path:
     """Keep stateful security data in the one backup/restore unit."""
     resolved = path.expanduser().resolve()
@@ -151,6 +173,21 @@ AUTH_DB_PATH = _require_runtime_data_path("AUTH_DB_PATH", AUTH_DB_PATH)
 QUALITY_DB_PATH = _require_runtime_data_path("QUALITY_DB_PATH", QUALITY_DB_PATH)
 
 
+def production_security_error() -> str | None:
+    """Return a blocking production-auth error, or ``None`` when ready."""
+    if RAG_ENVIRONMENT != "production":
+        return None
+    if DEPLOYMENT_MODE != "multi_user":
+        return "生产环境必须使用 DEPLOYMENT_MODE=multi_user"
+    if AUTH_MODE != "users":
+        return "生产环境必须使用 AUTH_MODE=users"
+    if not AUTH_COOKIE_SECURE:
+        return "AUTH_COOKIE_SECURE 必须为 1"
+    if not PUBLIC_BASE_URL.lower().startswith("https://"):
+        return "PUBLIC_BASE_URL 必须使用 HTTPS"
+    return _production_secret_error(AUTH_SECRET)
+
+
 def auth_readiness() -> dict:
     """Validate deployment/authentication mode without exposing secrets."""
     mode = DEPLOYMENT_MODE
@@ -162,6 +199,13 @@ def auth_readiness() -> dict:
         "database": "not_checked",
         "admin_count": 0,
     }
+    production_error = production_security_error()
+    if production_error:
+        result.update(
+            code="production_security_not_ready",
+            detail=production_error,
+        )
+        return result
     if mode not in {"dev", "single_user", "multi_user"}:
         result.update(code="invalid_deployment_mode", detail="DEPLOYMENT_MODE 无效")
         return result

@@ -40,6 +40,7 @@ SQLITE_PATHS = (
     "quality.sqlite3",
     "kb_data/chroma.sqlite3",
 )
+SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm")
 REPLACE_RETRIES = 8
 REPLACE_RETRY_DELAY_SECONDS = 0.25
 
@@ -135,6 +136,12 @@ def _file_records(data_dir: Path) -> list[dict[str, object]]:
             }
         )
     return records
+
+
+def _is_sqlite_sidecar(relative: str) -> bool:
+    """SQLite may create/delete these transient files during a read check."""
+
+    return relative.endswith(SQLITE_SIDECAR_SUFFIXES)
 
 
 def _write_json_atomic(path: Path, payload: dict) -> None:
@@ -320,12 +327,23 @@ def verify_backup(backup_dir: Path) -> dict[str, object]:
         for path in data_dir.rglob("*")
         if path.is_file()
     }
-    if set(actual_paths) != set(expected):
-        missing = sorted(set(expected) - set(actual_paths))
-        extra = sorted(set(actual_paths) - set(expected))
+    expected_strict = {
+        relative for relative in expected if not _is_sqlite_sidecar(relative)
+    }
+    actual_strict = {
+        relative for relative in actual_paths if not _is_sqlite_sidecar(relative)
+    }
+    if actual_strict != expected_strict:
+        missing = sorted(expected_strict - actual_strict)
+        extra = sorted(actual_strict - expected_strict)
         raise BackupError(f"Backup inventory mismatch; missing={missing}, extra={extra}")
 
     for relative, path in actual_paths.items():
+        # A SQLite read can remove an old sidecar or create a fresh one.  These
+        # files are not part of the logical database snapshot and are therefore
+        # excluded from strict inventory/hash comparison.
+        if _is_sqlite_sidecar(relative):
+            continue
         record = expected[relative]
         if path.stat().st_size != int(record.get("size", -1)):
             raise BackupError(f"Size mismatch: {relative}")

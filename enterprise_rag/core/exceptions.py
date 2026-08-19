@@ -34,3 +34,9 @@ class DocumentException(RAGException):
         super().__init__(message)
         # 上层上传批次需要据此决定是否强制刷新 BM25 派生索引。
         self.storage_may_have_changed = storage_may_have_changed
+
+
+class DocumentAuthorizationError(DocumentException):
+    """The upload principal is not allowed to create or replace this source."""
+
+    code = "document_authorization_failed"

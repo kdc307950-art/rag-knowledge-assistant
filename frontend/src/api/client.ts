@@ -1,17 +1,6 @@
-// fetch 封装：统一带 Cookie/Bearer、会话头，401 触发登出事件。
+// fetch 封装：浏览器认证统一使用 HttpOnly Cookie，另带会话头。
 const API_BASE = "/api";
-export const API_KEY_STORAGE_KEY = "apiKey";
-export const LOCAL_AUTH_STORAGE_KEY = "localAuth";
 export const SESSION_ID_STORAGE_KEY = "sessionId";
-let accessToken = "";
-
-export function setAccessToken(token: string) {
-  accessToken = token.trim();
-}
-
-export function clearAccessToken() {
-  accessToken = "";
-}
 
 export class ApiError extends Error {
   status: number;
@@ -34,9 +23,6 @@ export function friendlyApiError(error: unknown, fallback: string) {
 }
 
 function unauthorized(): never {
-  clearAccessToken();
-  localStorage.removeItem(API_KEY_STORAGE_KEY);
-  localStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
   clearSessionId();
   window.dispatchEvent(new CustomEvent("auth:logout"));
   throw new ApiError(401, "unauthorized");
@@ -54,7 +40,6 @@ export function captureSessionId(response: Response) {
 }
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const apiKey = localStorage.getItem(API_KEY_STORAGE_KEY) ?? "";
   const sessionId = sessionStorage.getItem(SESSION_ID_STORAGE_KEY) ?? "";
   const hasBody = init?.body != null;
   const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
@@ -63,11 +48,10 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   if (hasBody && !isFormData && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  if (accessToken && !headers.has("Authorization")) {
-    headers.set("Authorization", `Bearer ${accessToken}`);
-  } else if (apiKey && !headers.has("X-API-Key")) {
-    headers.set("X-API-Key", apiKey);
-  }
+  // Browser requests must not fall back to client-controlled credentials. The
+  // backend authenticates multi-user sessions from its HttpOnly cookie.
+  headers.delete("Authorization");
+  headers.delete("X-API-Key");
   if (sessionId && !headers.has("X-Session-Id")) {
     headers.set("X-Session-Id", sessionId);
   }

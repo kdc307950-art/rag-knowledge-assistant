@@ -1,85 +1,50 @@
 import { create } from "zustand";
-import {
-  API_KEY_STORAGE_KEY,
-  clearAccessToken,
-  clearSessionId,
-  LOCAL_AUTH_STORAGE_KEY,
-  setAccessToken,
-} from "../api/client";
+import { clearSessionId } from "../api/client";
 import { getCurrentUser, logoutUser } from "../api/auth";
 import type { AuthUser } from "../api/auth";
 
 interface AuthState {
-  apiKey: string;
   user: AuthUser | null;
   isAuthenticated: boolean;
+  restoring: boolean;
   restoreSession: () => Promise<void>;
-  loginUser: (token: string, user: AuthUser) => void;
-  login: (key: string) => void;
-  prepareLogin: (key: string) => void;
-  completeLogin: () => void;
-  logout: () => void;
+  loginUser: (user: AuthUser) => void;
+  clearAuth: () => void;
+  logout: () => Promise<void>;
 }
 
-function storedValue(key: string) {
-  return typeof localStorage === "undefined" ? null : localStorage.getItem(key);
+function resetState(set: (state: Partial<AuthState>) => void) {
+  clearSessionId();
+  set({ user: null, isAuthenticated: false, restoring: false });
 }
-
-const storedApiKey = storedValue(API_KEY_STORAGE_KEY) ?? "";
-const storedLocalAuth = storedValue(LOCAL_AUTH_STORAGE_KEY) === "1";
 
 export const useAuth = create<AuthState>((set) => ({
-  apiKey: storedApiKey,
   user: null,
-  isAuthenticated: Boolean(storedApiKey) || storedLocalAuth,
+  isAuthenticated: false,
+  restoring: true,
   restoreSession: async () => {
+    set({ restoring: true });
     try {
       const user = await getCurrentUser();
-      set({ user, isAuthenticated: true });
+      set({ user, isAuthenticated: true, restoring: false });
     } catch {
-      // No cookie-backed session is normal on the login screen.
+      // A missing or expired cookie is the normal logged-out state.
+      resetState(set);
     }
   },
-  loginUser: (token, user) => {
-    setAccessToken(token);
-    localStorage.removeItem(API_KEY_STORAGE_KEY);
-    localStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
+  loginUser: (user) => {
     clearSessionId();
-    set({ apiKey: "", user, isAuthenticated: true });
+    set({ user, isAuthenticated: true, restoring: false });
   },
-  login: (key: string) => {
-    const normalizedKey = key.trim();
-    if (normalizedKey) {
-      localStorage.setItem(API_KEY_STORAGE_KEY, normalizedKey);
-      localStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
-    } else {
-      localStorage.removeItem(API_KEY_STORAGE_KEY);
-      localStorage.setItem(LOCAL_AUTH_STORAGE_KEY, "1");
+  clearAuth: () => resetState(set),
+  logout: async () => {
+    try {
+      await logoutUser();
+    } catch {
+      // The local state must still be cleared if the server is unavailable or
+      // has already invalidated the cookie.
+    } finally {
+      resetState(set);
     }
-    clearSessionId();
-    set({ apiKey: normalizedKey, isAuthenticated: true });
-  },
-  // Persist the credential so the health probe can authenticate, but keep the
-  // UI on the login screen until that probe succeeds.
-  prepareLogin: (key: string) => {
-    const normalizedKey = key.trim();
-    if (normalizedKey) {
-      localStorage.setItem(API_KEY_STORAGE_KEY, normalizedKey);
-      localStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
-    } else {
-      localStorage.removeItem(API_KEY_STORAGE_KEY);
-      localStorage.setItem(LOCAL_AUTH_STORAGE_KEY, "1");
-    }
-    clearSessionId();
-    set({ apiKey: normalizedKey, isAuthenticated: false });
-  },
-  completeLogin: () => set({ isAuthenticated: true }),
-  logout: () => {
-    void logoutUser().catch(() => undefined);
-    clearAccessToken();
-    localStorage.removeItem(API_KEY_STORAGE_KEY);
-    localStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
-    clearSessionId();
-    set({ apiKey: "", user: null, isAuthenticated: false });
   },
 }));
