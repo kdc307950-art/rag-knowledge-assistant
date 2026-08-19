@@ -1,27 +1,28 @@
 {
   "schema_version": 1,
-  "default_retrieval_policy": "unresolved",
+  "default_retrieval_policy": "all_active",
   "documents": {
     "2025版新劳动合同法下的企业员工手册.md": {
       "document_family": "employee_handbook",
-      "version": "unconfirmed",
-      "effective_from": null,
+      "version": "2025-labour-contract-v1",
+      "effective_from": "2025-01-01",
       "effective_to": null,
-      "authority_level": "unconfirmed",
+      "authority_level": "reference",
       "retrieval_status": "active"
     },
     "企业员工手册（2025版）.md": {
       "document_family": "employee_handbook",
-      "version": "unconfirmed",
-      "effective_from": null,
+      "version": "2025-general-v1",
+      "effective_from": "2025-01-01",
       "effective_to": null,
-      "authority_level": "unconfirmed",
+      "authority_level": "reference",
       "retrieval_status": "active"
     }
   },
   "notes": [
-    "两份手册均未在正文中给出可核验的发布日期、生效日期或废止关系。",
-    "在 authority_level 明确前，不启用 authoritative_only 的运行时过滤。",
-    "确认发布部门、生效日期和废止关系后，再更新本文件、Chroma metadata 与 manifest。"
+    "2026-08-19 经负责人确认：两份手册均由 HR / 人力资源部发布，2025-01-01 起正式生效，互补并行各有侧重。",
+    "手册2中的 [公司名]/[地址]/[省] 等占位符为故意保留的脱敏/示范处理，不影响文档有效性。",
+    "authority_level=reference：两份手册同属 employee_handbook family，互补并行、无主从替代关系，不满足 authoritative（唯一权威）条件；升为 authoritative 需另行提供 control 证据包（issuing_department、approver、approval_reference 等）。",
+    "default_retrieval_policy 由 unresolved 改为 all_active，普通知识库问答现可正常检索两份手册。"
   ]
 }

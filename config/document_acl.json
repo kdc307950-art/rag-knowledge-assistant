@@ -3,22 +3,22 @@
   "documents": {
     "2025版新劳动合同法下的企业员工手册.md": {
       "classification": "policy",
-      "department": "general",
+      "department": "hr",
       "visibility": "all",
       "owner_id": "",
-      "basis": "正文第二条明确适用于公司全体员工；发布部门、生效证据和密级未提供。"
+      "basis": "2026-08-19 经负责人确认：HR / 人力资源部发布，2025-01-01 生效，面向全体员工，侧重劳动合同法框架。"
     },
     "企业员工手册（2025版）.md": {
       "classification": "policy",
-      "department": "general",
+      "department": "hr",
       "visibility": "all",
       "owner_id": "",
-      "basis": "正文第二条明确适用于全体员工；发布部门、生效证据和密级未提供。"
+      "basis": "2026-08-19 经负责人确认：HR / 人力资源部发布，2025-01-01 生效，面向全体员工，侧重日常管理规范；文中占位符为脱敏/示范处理。"
     }
   },
   "notes": [
-    "department=general 是未证实发布部门时的中性 ACL 分组，不代表 HR 发布。",
-    "visibility=all 仅表示文档正文面向全体员工，不改变文档生效权威关系。",
-    "文档治理 authority_level/retrieval_status 仍由 config/document_governance.json 管理。"
+    "department=hr 已经负责人确认，非推测值。",
+    "visibility=all 表示两份手册均面向公司全体员工。",
+    "文档治理 authority_level/retrieval_status 由 config/document_governance.json 管理。"
   ]
 }
