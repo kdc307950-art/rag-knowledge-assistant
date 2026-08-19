@@ -35,3 +35,7 @@ pure_chroma_probe/
 /_*.py
 _*.py
 .pytest-tmp-*
+
+# Docker / 容器化
+certs/
+frontend/dist/

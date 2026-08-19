@@ -1,0 +1,41 @@
+# 依赖和缓存
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+.uv-cache/
+
+# 运行时数据（不入镜像，由 compose 卷挂载）
+data/
+backups/
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+
+# 测试和临时文件
+.pytest-tmp*/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+/eval/results/
+/eval/recovered_sources/
+.api_test_data/
+.verify_tmp/
+
+# 前端构建产物（由 Dockerfile Stage 1 构建，不需要宿主机文件）
+frontend/dist/
+frontend/node_modules/
+
+# 机密和本地配置
+.env
+enterprise_rag/.env
+certs/
+
+# Git
+.git/
+.github/
+.gitignore
+
+# IDE
+.idea/
+*.iml

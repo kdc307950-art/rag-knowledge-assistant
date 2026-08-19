@@ -1,0 +1,51 @@
+services:
+  backend:
+    build:
+      context: .
+      target: backend
+    image: enterprise-rag-backend:latest
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - rag_data:/app/data
+      - rag_backups:/app/backups
+      - model_cache:/app/model_cache
+    expose:
+      - "8000"
+    healthcheck:
+      # 使用内置 Python 探测 /api/ready，无需额外工具
+      test: >
+        python -c "
+        import urllib.request, sys;
+        try:
+          r = urllib.request.urlopen('http://localhost:8000/api/ready', timeout=5);
+          sys.exit(0 if r.status < 400 else 1)
+        except Exception:
+          sys.exit(1)
+        "
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # 首次启动需下载模型，给足时间
+      start_period: 120s
+
+  nginx:
+    build:
+      context: .
+      target: nginx
+    image: enterprise-rag-nginx:latest
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # 生产 HTTPS：挂载证书目录（宿主机 ./certs/ 需包含 fullchain.pem + privkey.pem）
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  rag_data:
+  rag_backups:
+  model_cache:
