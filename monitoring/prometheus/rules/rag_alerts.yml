@@ -1,0 +1,85 @@
+groups:
+  - name: rag_availability
+    rules:
+      # 规则1：服务宕机——Prometheus 无法抓取 /metrics 超过 2 分钟
+      - alert: RagServiceDown
+        expr: up{job="rag"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "RAG 服务不可达"
+          description: >
+            Prometheus 连续 2 分钟无法抓取 {{ $labels.instance }} 的指标，
+            服务可能已崩溃或网络中断。
+
+      # 规则2：向量存储不健康——检索将全部失败
+      - alert: RagVectorStoreUnhealthy
+        expr: rag_vector_health == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "向量存储不健康"
+          description: >
+            rag_vector_health 持续为 0 超过 2 分钟。
+            所有检索请求将失败，请检查 ChromaDB 状态及磁盘空间。
+
+  - name: rag_errors
+    rules:
+      # 规则3：5xx 错误率过高——正常业务流量超过 5% 报错
+      - alert: RagHighErrorRate
+        expr: >
+          sum(rate(rag_errors_total[5m])) /
+          (sum(rate(rag_requests_total{route_type="request"}[5m])) + 0.001) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RAG 错误率过高 ({{ printf \"%.1f\" $value | humanizePercentage }})"
+          description: >
+            过去 5 分钟应用错误率超过 5%，当前约 {{ $value | humanizePercentage }}。
+            请检查 /api/diagnostics 和 error.log。
+
+      # 规则4：认证失败突增——可能暴力破解
+      - alert: RagAuthFailureBurst
+        expr: increase(rag_auth_failures_total[5m]) > 20
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "5 分钟内认证失败 {{ $value | humanize }} 次"
+          description: >
+            过去 5 分钟认证失败次数超过 20，可能存在暴力破解或凭据泄露。
+            请检查访问日志并考虑临时封禁来源 IP。
+
+  - name: rag_latency
+    rules:
+      # 规则5：LLM P95 延迟过高——用户感知响应慢
+      - alert: RagLlmHighLatencyP95
+        expr: >
+          histogram_quantile(0.95,
+            sum(rate(rag_llm_latency_seconds_bucket[10m])) by (le)
+          ) > 60
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM P95 延迟 {{ $value | humanizeDuration }}"
+          description: >
+            过去 10 分钟 LLM 调用 P95 延迟超过 60 秒，当前约 {{ $value | humanizeDuration }}。
+            请检查 LLM 服务商状态或模型负载。
+
+      # 规则6：知识库持续拒答——数据治理或检索配置问题
+      - alert: RagHighRefusalRate
+        expr: >
+          rate(rag_refusals_total[10m]) /
+          (sum(rate(rag_requests_total{route_type="request"}[10m])) + 0.001) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "知识库拒答率过高 ({{ $value | humanizePercentage }})"
+          description: >
+            过去 10 分钟超过 50% 的问答请求被严格知识库模式拒答，
+            可能是文档治理配置（retrieval_status/authority_level）或检索阈值问题。

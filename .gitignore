@@ -39,3 +39,6 @@ _*.py
 # Docker / 容器化
 certs/
 frontend/dist/
+
+# 监控栈运行时数据（由 Docker 卷管理）
+monitoring/grafana/data/

@@ -45,7 +45,74 @@ services:
       backend:
         condition: service_healthy
 
+  # ── 监控栈（启用：docker compose --profile monitoring up -d）──────────────────
+
+  prometheus:
+    profiles: [monitoring]
+    image: prom/prometheus:v2.54.1
+    entrypoint: ["/bin/sh", "/etc/prometheus/entrypoint.sh"]
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    environment:
+      - METRICS_TOKEN=${METRICS_TOKEN}
+    volumes:
+      - ./monitoring/prometheus/entrypoint.sh:/etc/prometheus/entrypoint.sh:ro
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    restart: unless-stopped
+    expose:
+      - "9090"
+
+  alertmanager:
+    profiles: [monitoring]
+    image: prom/alertmanager:v0.27.0
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    restart: unless-stopped
+    expose:
+      - "9093"
+
+  wechat-webhook:
+    profiles: [monitoring]
+    build:
+      context: ./monitoring/wechat_webhook
+    environment:
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    restart: unless-stopped
+    expose:
+      - "5001"
+
+  grafana:
+    profiles: [monitoring]
+    image: grafana/grafana:11.2.0
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   rag_data:
   rag_backups:
   model_cache:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:
