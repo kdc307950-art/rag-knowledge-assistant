@@ -28,8 +28,10 @@
 
 1. 当前候选是否明确替代其他来源：是/否。
 2. 如“是”，列出被替代来源、废止或替代依据、证据编号和生效衔接日期。
-3. 如“否”，说明是否属于不同适用范围；无法确认则保持 `unconfirmed` 与全局 `unresolved`，不要开启普通检索。
-4. 两份内容冲突时，记录由谁确认的优先级、依据和日期。
+3. 如“否”，按确认程度分两种落法，不要混用：
+   - **生效关系已确认、但并行有效无主从**（当前两份员工手册即属此类）：标记 `reference` + `active`，全局用 `all_active`，普通检索照常开启。`reference` 表示“都有效”，不表示“已排序”。
+   - **生效关系无法确认**：保持 `unconfirmed` 与全局 `unresolved`，不要开启普通检索。
+4. 两份内容冲突时，记录由谁确认的优先级、依据和日期。仅 `reference` 无法让系统自动裁决冲突——需要唯一口径就必须完成本证据包并升为 `authoritative`。
 
 ## 配置落地前复核
 
@@ -37,7 +39,7 @@
 - [ ] 同一 `document_family` 仅一个 `authoritative` + `active` 来源。
 - [ ] 被替代来源已设为 `superseded` + `archived`，并列入当前来源的 `supersedes`。
 - [ ] `control.evidence_refs` 均可被审计人员定位。
-- [ ] 将 `default_retrieval_policy` 改为 `authoritative` 前，已确认没有 `active/unconfirmed` 条目。
+- [ ] 将 `default_retrieval_policy` 改为 `authoritative` 前，已确认没有 `active/unconfirmed` 也没有 `active/reference` 条目——两者在该策略下都不可检索，`load_governance` 会直接报错而不是静默缩小知识库。
 - [ ] 先运行 `uv run python scripts/sync_document_governance.py` 预览，复核无误后才执行 `--apply`。
 - [ ] 再运行检索基线并保存结果，记录其中的 `document_governance_sha256`。
 

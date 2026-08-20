@@ -11,6 +11,8 @@
 - [核心流程](#核心流程)
 - [代码结构](#代码结构)
 - [配置项](#配置项)
+- [容器化部署（Linux 生产）](#容器化部署linux-生产)
+- [监控栈](#监控栈)
 - [数据与运维](#数据与运维)
 - [测试与排障](#测试与排障)
 
@@ -171,9 +173,29 @@ Chroma 保存物理分块，`data/kb_manifest.sqlite3` 保存每个来源当前�
 
 ### 文档生效治理
 
-`config/document_governance.json` 是文档可见性的唯一配置来源。当前两份员工手册明确保持 `default_retrieval_policy=unresolved`，因此普通问答会安全暂停，不能根据文件名、修改时间或文本相似度推断哪一份生效。`unresolved` 是部署锁定状态，不会静默检索“恰好看起来权威”的文档子集。
+`config/document_governance.json` 是文档可见性的唯一配置来源。可见性只由这份配置里的显式声明决定，任何时候都不会根据文件名、修改时间或文本相似度推断哪一份文档生效。
 
-将策略切换到 `authoritative` 前，按 [document-control-evidence-template.md](docs/document-control-evidence-template.md) 完成证据包。权威来源必须有正式版本、生效日期、发布部门、批准人、审批与告知记录、适用范围、替代结论、冲突优先级和可定位的证据引用；同一 `document_family` 只能有一个 `authoritative` + `active` 来源。被替代文档必须是 `superseded` + `archived`，并由当前文档的 `supersedes` 显式关联。
+**当前生产配置：`default_retrieval_policy=all_active`，两份员工手册均为 `authority_level=reference` + `retrieval_status=active`。** 负责人已确认两份手册同由 HR 发布、2025-01-01 起并行生效、互补而无主从替代关系（见配置内 `notes` 字段）。因为不存在唯一权威，它们不满足 `authoritative` 的条件，但生效关系本身已确认，所以按 `reference` 正常参与检索。
+
+`authority_level` 的五个取值和两条策略共同决定可见性：
+
+| `authority_level` | 含义 | `all_active` 下可检索 | `authoritative` 下可检索 |
+| --- | --- | --- | --- |
+| `authoritative` | 家族内唯一权威，须附完整 `control` 证据包 | 是 | 是 |
+| `reference` | 生效关系已确认，但非家族内唯一权威 | 是 | 否 |
+| `unconfirmed` | 生效关系未经确认 | 是 | 否（配置校验直接拒绝） |
+| `superseded` | 已被替代，必须同时是 `archived` | 否 | 否 |
+| `draft` | 草稿 | 否 | 否 |
+
+| `default_retrieval_policy` | 行为 |
+| --- | --- |
+| `unresolved` | 部署锁定态：只要存在任何 active 文档，普通问答一律 fail-closed 拒答，不会退而检索“恰好看起来权威”的子集 |
+| `all_active` | 检索所有 `active` 且非 `draft`/`superseded` 的文档（**当前生产配置**） |
+| `authoritative` | 只检索 `authoritative`；配置中若还留有 `active` + `unconfirmed` 条目，`load_governance` 直接报错而不是静默缩小结果集 |
+
+将某一份升为 `authoritative` 前，按 [document-control-evidence-template.md](docs/document-control-evidence-template.md) 完成证据包。权威来源必须有正式版本、生效日期、发布部门、批准人、审批与告知记录、适用范围、替代结论、冲突优先级和可定位的证据引用；同一 `document_family` 只能有一个 `authoritative` + `active` 来源。被替代文档必须是 `superseded` + `archived`，并由当前文档的 `supersedes` 显式关联。
+
+两份手册条款冲突时，系统不会自动裁决优先级——`reference` 表示“都有效”，而不是“已排序”。需要唯一口径的场景必须先走证据包流程确定 `authoritative`。
 
 先只预览同步结果：
 
@@ -286,8 +308,9 @@ data/                     所有运行数据的默认根目录
 | `QUALITY_MAX_QUERY_CHARS` | `4000` | 入库前的问题最大字符数 |
 | `QUALITY_MAX_ANSWER_CHARS` | `12000` | 入库前的回答最大字符数 |
 | `QUALITY_FEEDBACK_LIMIT_PER_HOUR` | `30` | 单个用户每小时可创建的反馈上限；幂等重试不消耗额度 |
-| `METRICS_TOKEN` | 空 | `/metrics` 的独立访问令牌；未设置时仅允许 loopback |
-| `ALERT_WEBHOOK_URL` | 空 | 外部健康检查的尽力而为 webhook，不写入日志 |
+| `METRICS_TOKEN` | 空 | `/metrics` 的独立访问令牌；Prometheus 用 `Authorization: Bearer` 发送同值，手动 curl 用 `X-Metrics-Token`；未设置时仅允许 loopback |
+| `ALERT_WEBHOOK_URL` | 空 | 企业微信机器人 webhook URL；`RAG_ENVIRONMENT=production` 时生产安全门控会检查，未配置则拒绝就绪 |
+| `GRAFANA_ADMIN_PASSWORD` | 空 | 监控栈 Grafana 管理员密码；**无默认值**，缺失或使用 `changeme`/`admin`/`password` 时 `monitoring` profile 拒绝启动 |
 | `RAG_DATA_DIR` | `<项目根>/data` | 统一迁移缓存、Chroma 与 manifest 的运行数据根目录 |
 | `RAG_LOG_DIR` | `<RAG_DATA_DIR>/logs` | 运行日志目录；适合部署时挂载到独立持久化卷 |
 | `RAG_BACKUP_DIR` | `<项目根>/backups` | 离线备份和验证台账目录 |
@@ -316,6 +339,159 @@ data/                     所有运行数据的默认根目录
 | `UPLOAD_STAGING_TTL_SECONDS` | `86400` | 异常退出后遗留暂存目录的清理期限（秒） |
 | `VECTOR_WRITE_BATCH_SIZE` | `512` | 每次向量化并写入 Chroma 的最大子块数 |
 | `EMBEDDING_BATCH_SIZE` | `32` | Embedding 模型内部编码批次大小 |
+
+## 容器化部署（Linux 生产）
+
+目标环境：原生 Linux + Docker Compose；WSL2 仅用于本地开发。
+
+### 前提
+
+- Docker Engine ≥ 24，Docker Compose v2（`docker compose` 子命令）
+- 配置好 `.env`（从 `.env.example` 复制并填写）
+- HTTPS 证书放入 `certs/fullchain.pem` 和 `certs/privkey.pem`
+
+### HTTPS
+
+`nginx.conf` 已启用真实 HTTPS，没有可退回明文的分支：80 端口只保留 ACME 续期路径，其余一律 `301` 跳转到 443；应用入口只在 443 上。证书目录以只读方式挂载到 `/etc/nginx/certs`，**两个证书文件缺失时 nginx 会启动失败**——这是刻意的，生产不允许静默降级到明文 HTTP。
+
+TLS 侧固定为 TLSv1.2/1.3、仅 ECDHE-AEAD 套件、关闭 session ticket，并下发 HSTS、`X-Content-Type-Options`、`X-Frame-Options: DENY` 和 `Referrer-Policy`。HSTS 是 `.env` 中 `AUTH_COOKIE_SECURE=1` 能成立的前提。`/metrics` 在 nginx 层 `deny all`，只允许 Prometheus 走容器网络抓取。
+
+本地验收可先生成自签证书（`certs/` 已在 `.gitignore` 中，不会被提交）：
+
+```bash
+bash scripts/gen_dev_certs.sh                  # CN=localhost
+bash scripts/gen_dev_certs.sh kb.example.com   # 指定域名
+```
+
+自签证书不被信任，`curl` 需加 `-k`，浏览器会告警。生产请用 Let's Encrypt 或企业 CA 签发的证书覆盖同名文件。
+
+### 必须在 .env 中设置的生产环境变量
+
+```env
+RAG_ENVIRONMENT=production
+DEPLOYMENT_MODE=multi_user
+AUTH_MODE=users
+AUTH_SECRET=<至少 32 字节的随机字符串>
+AUTH_COOKIE_SECURE=1
+PUBLIC_BASE_URL=https://your.domain.com
+ALERT_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...
+```
+
+### 生产安全门控
+
+启动时 `/api/ready` 会通过 `production_security_error()` 校验以下所有条件，任一不满足则返回 `503`，阻止就绪：
+
+1. `DEPLOYMENT_MODE=multi_user`
+2. `AUTH_MODE=users`
+3. `AUTH_COOKIE_SECURE=1`
+4. `PUBLIC_BASE_URL` 以 `https://` 开头
+5. `ALERT_WEBHOOK_URL` 非空（监控告警渠道已接入）
+6. `AUTH_SECRET` 长度 ≥ 32 字节且无弱密码/重复模式
+
+### 启动与停止
+
+```bash
+# 首次或配置变更后：构建镜像
+docker compose build
+
+# 后台启动（process guardian 由 restart: unless-stopped 承担）
+docker compose up -d
+
+# 查看服务状态
+docker compose ps
+
+# 停止服务（备份前必须执行）
+docker compose stop backend
+```
+
+### Docker 环境下的备份
+
+Chroma/HNSW 不支持在线热快照，备份前必须停写：
+
+```bash
+docker compose stop backend
+docker compose run --rm backend \
+  python scripts/backup.py create --confirm-stopped
+docker compose start backend
+```
+
+恢复同理：先停止 backend，运行 restore，再启动。备份数据存储在 `rag_backups` Docker 卷（宿主机路径见 `docker volume inspect`）。
+
+## 监控栈
+
+监控栈（Prometheus + Grafana + Alertmanager + 企业微信适配器）作为独立 profile 运行，不影响主服务。
+
+### 前提
+
+`.env` 中已填写：
+
+```env
+METRICS_TOKEN=<与 /metrics 访问令牌同值>
+ALERT_WEBHOOK_URL=<企业微信机器人 webhook URL>
+GRAFANA_ADMIN_PASSWORD=<自定义密码，不能是 changeme/admin/password>
+```
+
+三项都没有默认值。
+
+### 缺配置时硬失败
+
+监控栈的失败模式是“起不来”，不是“带着残缺配置跑起来”——后者会产生比没有监控更危险的假象：面板亮着、告警永不触发。三道闸门：
+
+| 闸门 | 触发条件 | 行为 |
+| --- | --- | --- |
+| `monitoring-preflight` 服务 | 三个变量任一为空，或 Grafana 口令是 `changeme`/`admin`/`password` | 退出码 1；其余四个服务都 `depends_on: service_completed_successfully`，整个 profile 拒绝启动 |
+| `monitoring/prometheus/entrypoint.sh` | `METRICS_TOKEN` 为空 | 直接退出，不再写空 token 文件（那会让每次 scrape 都被后端 401，时间序列全空） |
+| `monitoring/wechat_webhook/server.py` | `ALERT_WEBHOOK_URL` 为空 | 启动时 `SystemExit`，不再是记一条 warning 后返回 `sent=false`（那会让告警投递“成功”但无人收到） |
+
+preflight 只在 `--profile monitoring` 内生效，不带该 profile 的主服务启动不受影响。
+
+### 启动
+
+```bash
+docker compose --profile monitoring up -d
+```
+
+### 访问 Grafana
+
+Grafana **只绑定回环地址**（`127.0.0.1:3000`），不直出公网。运维通过 SSH 隧道访问：
+
+```bash
+ssh -N -L 3000:127.0.0.1:3000 <user>@<host>
+```
+
+然后在本地浏览器打开 `http://127.0.0.1:3000`，用户名 `admin`，密码取自 `GRAFANA_ADMIN_PASSWORD`。预置仪表盘位于 "RAG 系统总览"。Prometheus、Alertmanager 和 webhook 适配器只有 `expose`，完全不映射到宿主机端口，仅在 compose 网络内可达。
+
+### 告警规则（6 条）
+
+| 规则 | 触发条件 | 等待 | 级别 |
+| --- | --- | --- | --- |
+| `RagServiceDown` | Prometheus 无法抓取 `/metrics` | 2 分钟 | critical |
+| `RagVectorStoreUnhealthy` | `rag_vector_health == 0` | 2 分钟 | critical |
+| `RagHighErrorRate` | 应用错误率 > 5% | 5 分钟 | warning |
+| `RagAuthFailureBurst` | 5 分钟内认证失败 > 20 次 | 即时 | warning |
+| `RagLlmHighLatencyP95` | LLM P95 延迟 > 60s | 5 分钟 | warning |
+| `RagHighRefusalRate` | 知识库拒答率 > 50% | 10 分钟 | warning |
+
+服务宕机（critical）会自动抑制同 job 的其他 warning 告警，避免告警风暴。
+
+### 验证企业微信通知
+
+适配器只有 `expose`、不映射宿主机端口，所以要从 compose 网络内部发请求。
+
+```bash
+# 1. 确认适配器健康（webhook_configured 恒为 true——为空时进程根本起不来）
+docker compose exec wechat-webhook python -c \
+  "import json,urllib.request;print(json.load(urllib.request.urlopen('http://localhost:5001/health')))"
+
+# 2. 发送 firing + recovery 两条测试消息
+docker compose run --rm --no-deps \
+  -v "$PWD/scripts/check_alert_webhook.py:/tmp/check.py:ro" \
+  wechat-webhook python /tmp/check.py http://wechat-webhook:5001/webhook
+```
+
+脚本只用标准库，因此可以直接挂进适配器镜像跑，不需要额外依赖。它刻意不叫 `test_*`，否则 pytest 会在收集阶段导入并真的发出网络请求。
+
+两条消息均应在企业微信机器人对话中出现：红色告警（🔴）和绿色恢复（✅）。
 
 ## 数据与运维
 

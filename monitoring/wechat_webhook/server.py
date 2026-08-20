@@ -25,6 +25,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("wechat_webhook")
 
+# 没有 URL 就没有告警通道。以前这里只是记一条 warning 然后返回 sent=false，
+# 于是适配器健康、Alertmanager 投递成功、告警却谁也没收到。宁可起不来。
+if not WECHAT_URL:
+    raise SystemExit(
+        "wechat-webhook 启动被拒绝：ALERT_WEBHOOK_URL 为空，告警将无处投递。\n"
+        "请在 .env 中设置企业微信机器人 webhook URL 后重试。"
+    )
+
 app = FastAPI(title="wechat-webhook", docs_url=None, redoc_url=None)
 
 _SEVERITY_ICON = {"critical": "🚨", "warning": "⚠️", "info": "ℹ️"}
@@ -99,10 +107,6 @@ async def receive(request: Request) -> JSONResponse:
     n = len(body.get("alerts", []))
     logger.info("received status=%s alerts=%d", status, n)
 
-    if not WECHAT_URL:
-        logger.warning("ALERT_WEBHOOK_URL not configured, dropping notification")
-        return JSONResponse({"sent": False, "reason": "no_url"})
-
     payload = _build_payload(body)
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -120,7 +124,8 @@ async def receive(request: Request) -> JSONResponse:
 
 @app.get("/health")
 async def health() -> JSONResponse:
-    return JSONResponse({"ok": True, "webhook_configured": bool(WECHAT_URL)})
+    # 进程能起来就意味着 URL 已配置（见模块顶部的启动闸门）
+    return JSONResponse({"ok": True, "webhook_configured": True})
 
 
 if __name__ == "__main__":

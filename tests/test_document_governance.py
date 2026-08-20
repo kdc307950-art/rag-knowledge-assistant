@@ -30,14 +30,44 @@ def test_manifest_persists_and_removes_source_metadata(tmp_path):
     assert manifest.get_source_metadata("book.md") == {}
 
 
-def test_governance_metadata_never_contains_none_for_chroma():
+def test_governance_metadata_never_contains_none_for_chroma(tmp_path):
+    """Chroma rejects None metadata; both the unknown and the explicit-null path must coerce.
+
+    Pinned to a fixture rather than to config/document_governance.json so that
+    governing a real document can never silently change what this asserts.
+    """
     from enterprise_rag.storage.document_governance import metadata_for_source
 
-    metadata = metadata_for_source("2025版新劳动合同法下的企业员工手册.md")
-    assert metadata["effective_from"] == ""
-    assert metadata["effective_to"] == ""
-    assert all(value is not None for value in metadata.values())
-    assert metadata["authority_level"] == "unconfirmed"
+    path = tmp_path / "governance.json"
+    path.write_text(
+        '''{
+          "schema_version": 1,
+          "default_retrieval_policy": "all_active",
+          "documents": {
+            "governed.md": {
+              "document_family": "handbook", "version": "2025",
+              "effective_from": "2025-01-01", "effective_to": null,
+              "authority_level": "reference", "retrieval_status": "active"
+            }
+          }
+        }''',
+        encoding="utf-8",
+    )
+
+    # Source absent from the config: every field falls back, nothing is None.
+    unknown = metadata_for_source("not-in-config.md", path=path)
+    assert unknown["effective_from"] == ""
+    assert unknown["effective_to"] == ""
+    assert unknown["authority_level"] == "unconfirmed"
+    assert unknown["retrieval_status"] == "active"
+    assert all(value is not None for value in unknown.values())
+
+    # Source present but with an explicit JSON null: coerced to "", not passed through.
+    governed = metadata_for_source("governed.md", path=path)
+    assert governed["effective_from"] == "2025-01-01"
+    assert governed["effective_to"] == ""
+    assert governed["authority_level"] == "reference"
+    assert all(value is not None for value in governed.values())
 
 
 def test_governance_filter_excludes_archived_and_fails_closed_when_unconfirmed(monkeypatch):
@@ -104,6 +134,47 @@ def test_unresolved_policy_never_silently_uses_a_partial_authoritative_subset(mo
     monkeypatch.setattr(vector_store, "get_manifest", lambda: Manifest())
     with pytest.raises(DocumentGovernanceError):
         vector_store._active_revision_filter(snapshot, policy="unresolved")
+
+
+def test_authoritative_policy_rejects_active_reference_sources(tmp_path):
+    """Switching to ``authoritative`` must not silently drop ``reference`` documents."""
+    from enterprise_rag.storage.document_governance import load_governance
+
+    path = tmp_path / "governance.json"
+    body = '''{
+      "schema_version": 1,
+      "default_retrieval_policy": "%s",
+      "documents": {
+        "handbook-a.md": {
+          "document_family": "handbook", "version": "2025-a",
+          "effective_from": "2025-01-01", "effective_to": null,
+          "authority_level": "reference", "retrieval_status": "active"
+        }
+      }
+    }'''
+
+    path.write_text(body % "authoritative", encoding="utf-8")
+    with pytest.raises(ValueError, match="reference"):
+        load_governance(path)
+
+    # The same configuration is valid under all_active, which is what it is for.
+    path.write_text(body % "all_active", encoding="utf-8")
+    assert load_governance(path)["documents"]["handbook-a.md"]["authority_level"] == "reference"
+
+
+def test_shipped_governance_config_matches_documented_policy():
+    """config/document_governance.json is the source of truth the docs describe."""
+    from enterprise_rag.config import DOCUMENT_GOVERNANCE_PATH
+    from enterprise_rag.storage.document_governance import load_governance
+
+    payload = load_governance(DOCUMENT_GOVERNANCE_PATH)
+    assert payload["default_retrieval_policy"] == "all_active"
+    documents = payload["documents"]
+    assert documents, "生产治理配置不应为空"
+    for source, metadata in documents.items():
+        assert metadata["authority_level"] == "reference", source
+        assert metadata["retrieval_status"] == "active", source
+        assert "supersedes" not in metadata, f"{source} 并行有效，不应存在替代关系"
 
 
 def test_authoritative_state_requires_auditable_control_package(tmp_path):

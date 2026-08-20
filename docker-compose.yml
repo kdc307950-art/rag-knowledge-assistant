@@ -47,6 +47,46 @@ services:
 
   # ── 监控栈（启用：docker compose --profile monitoring up -d）──────────────────
 
+  # 前置校验：缺少任一密钥就让整个监控栈起不来。
+  # 不用 compose 的 ${VAR:?err} 语法——那是在解析整个文件时求值的，会连带
+  # 拖垮不带 --profile monitoring 的主服务启动；这里把硬失败限定在 profile 内。
+  monitoring-preflight:
+    profiles: [monitoring]
+    image: busybox:1.36
+    environment:
+      - METRICS_TOKEN=${METRICS_TOKEN:-}
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
+      - GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        # 逐个显式传值，不用 for+eval 间接展开：compose 会先对 $$name 做插值
+        # （留下 "variable is not set" 警告），到容器里已经变成空串，
+        # 结果是三个密钥全空也照样校验通过——静默失效的闸门比没有闸门更糟。
+        fail=0
+        require() {
+          if [ -z "$$2" ]; then
+            echo "监控栈启动被拒绝：.env 未设置 $$1" >&2
+            fail=1
+          fi
+        }
+        require METRICS_TOKEN "$$METRICS_TOKEN"
+        require ALERT_WEBHOOK_URL "$$ALERT_WEBHOOK_URL"
+        require GRAFANA_ADMIN_PASSWORD "$$GRAFANA_ADMIN_PASSWORD"
+        case "$$GRAFANA_ADMIN_PASSWORD" in
+          changeme|admin|password)
+            echo "监控栈启动被拒绝：GRAFANA_ADMIN_PASSWORD 不能使用默认口令" >&2
+            fail=1
+            ;;
+        esac
+        if [ "$$fail" -ne 0 ]; then
+          echo "请补全 .env 后重试；监控栈不接受默认口令或静默丢弃告警的配置。" >&2
+          exit 1
+        fi
+        echo "监控栈前置校验通过。"
+    restart: "no"
+
   prometheus:
     profiles: [monitoring]
     image: prom/prometheus:v2.54.1
@@ -57,12 +97,15 @@ services:
       - "--storage.tsdb.retention.time=15d"
       - "--web.enable-lifecycle"
     environment:
-      - METRICS_TOKEN=${METRICS_TOKEN}
+      - METRICS_TOKEN=${METRICS_TOKEN:-}
     volumes:
       - ./monitoring/prometheus/entrypoint.sh:/etc/prometheus/entrypoint.sh:ro
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
       - prometheus_data:/prometheus
+    depends_on:
+      monitoring-preflight:
+        condition: service_completed_successfully
     restart: unless-stopped
     expose:
       - "9090"
@@ -76,6 +119,9 @@ services:
     volumes:
       - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
+    depends_on:
+      monitoring-preflight:
+        condition: service_completed_successfully
     restart: unless-stopped
     expose:
       - "9093"
@@ -85,8 +131,11 @@ services:
     build:
       context: ./monitoring/wechat_webhook
     environment:
-      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL}
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      monitoring-preflight:
+        condition: service_completed_successfully
     restart: unless-stopped
     expose:
       - "5001"
@@ -95,7 +144,8 @@ services:
     profiles: [monitoring]
     image: grafana/grafana:11.2.0
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}
+      # 无默认值：口令由 monitoring-preflight 强制要求，缺失时整个 profile 拒绝启动
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-}
       - GF_AUTH_ANONYMOUS_ENABLED=false
       - GF_ANALYTICS_REPORTING_ENABLED=false
       - GF_ANALYTICS_CHECK_FOR_UPDATES=false
@@ -104,9 +154,14 @@ services:
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     ports:
-      - "3000:3000"
+      # 只绑定回环：Grafana 不直出公网，运维通过 SSH 隧道访问
+      #   ssh -N -L 3000:127.0.0.1:3000 <user>@<host>
+      - "127.0.0.1:3000:3000"
     depends_on:
-      - prometheus
+      monitoring-preflight:
+        condition: service_completed_successfully
+      prometheus:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
