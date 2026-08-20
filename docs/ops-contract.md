@@ -48,15 +48,15 @@ Chroma/HNSW 没有本项目可依赖的在线热快照契约。创建或恢复�
 
 若启用质量反馈，生产部署还必须配置独立的 Fernet key、每日执行保留期清理，并把 `quality.sqlite3` 纳入同一受控备份域。密钥丢失会使历史问题和回答不可解密，不能通过重置应用恢复。
 
-反向代理不得把 `/api/live`、`/api/ready` 直接暴露给公网；它们应仅供本机或受控监控网段访问。若代理 `/metrics`，必须配置 `METRICS_TOKEN`，因为反向代理的 loopback 来源会绕过“仅本机”判断。compose 自带的 nginx 直接 `deny all` 拒绝 `/metrics`，Prometheus 走容器网络抓取，不经过公网入口。
+反向代理不得把 `/api/live`、`/api/ready` 直接暴露给公网；它们应仅供本机或受控监控网段访问。compose 自带的 nginx 对这两个精确路径固定返回 `404`，backend 容器健康检查直接访问自身的 `/api/ready`。若代理 `/metrics`，必须配置 `METRICS_TOKEN`，因为反向代理的 loopback 来源会绕过“仅本机”判断。compose 自带的 nginx 直接 `deny all` 拒绝 `/metrics`，Prometheus 走容器网络抓取，不经过公网入口。
 
-Compose 部署由 nginx 终止 TLS：443 是唯一的应用入口，80 仅保留 `/.well-known/acme-challenge/` 用于 ACME 续期，其余一律 `301` 到 HTTPS。只启用 TLS 1.2/1.3，附带 HSTS 及三个常规安全响应头。证书从宿主机 `./certs/` 只读挂载，必须同时存在 `fullchain.pem` 与 `privkey.pem`；缺失时 nginx 直接启动失败，不会降级成明文 HTTP 服务——这是刻意的，静默的 HTTP 回退比起不来更危险。本地验收可用 `scripts/gen_dev_certs.sh` 生成自签证书，生产必须替换为受信任 CA 签发的证书。
+Compose 部署由 nginx 终止 TLS：443 是唯一的应用入口，80 仅保留 `/.well-known/acme-challenge/` 用于 ACME 续期，其余一律 `301` 到 HTTPS。宿主机 `./certbot/www/` 以只读方式挂载到 nginx 的 `/var/www/certbot`，Certbot `--webroot` 使用同一目录写入 challenge。只启用 TLS 1.2/1.3，附带 HSTS 及三个常规安全响应头。证书从宿主机 `./certs/` 只读挂载，必须同时存在 `fullchain.pem` 与 `privkey.pem`；缺失时 nginx 直接启动失败，不会降级成明文 HTTP 服务——这是刻意的，静默的 HTTP 回退比起不来更危险。本地验收可用 `scripts/gen_dev_certs.sh` 生成自签证书，生产必须替换为受信任 CA 签发的证书。
 
 ## 监控栈边界
 
 监控栈是 `--profile monitoring` 的可选组件，默认不启动，也不影响主服务。
 
-`monitoring-preflight` 是整个 profile 的前置闸门：`METRICS_TOKEN`、`ALERT_WEBHOOK_URL`、`GRAFANA_ADMIN_PASSWORD` 任一为空，或 Grafana 口令使用 `changeme`/`admin`/`password`，则该容器退出 1，其余四个服务因 `service_completed_successfully` 全部停在 `Created` 不启动。Prometheus 和企业微信适配器各自还有一道容器内校验，缺 token 或缺 webhook 时同样拒绝启动。三道闸门都是宁可起不来：一个抓不到数据或丢弃告警的监控栈会让人误以为有覆盖。
+`monitoring-preflight` 是整个 profile 的前置闸门：`METRICS_TOKEN`、`ALERT_WEBHOOK_URL`、`GRAFANA_ADMIN_PASSWORD` 任一为空，或 Grafana 口令使用 `changeme`/`admin`/`password`，则该容器退出 1，其余四个服务因 `service_completed_successfully` 全部停在 `Created` 不启动。Prometheus 和企业微信适配器各自还有一道容器内校验，缺 token 或缺 webhook 时同样拒绝启动；Alertmanager 还会等待适配器健康检查通过。企业微信即使返回 HTTP 200，只要响应不是合法 JSON 或 `errcode != 0`，适配器仍返回 `502` 让 Alertmanager 重试。所有闸门都是宁可起不来或明确失败：一个抓不到数据或丢弃告警的监控栈会让人误以为有覆盖。
 
 端口暴露边界：只有 Grafana 绑定宿主机端口，且限定 `127.0.0.1:3000`，运维通过 SSH 隧道访问（`ssh -N -L 3000:127.0.0.1:3000 <user>@<host>`）。Prometheus、Alertmanager 和 webhook 适配器只在容器网络内 `expose`，没有宿主机端口，不可从公网直达。Grafana 管理员口令无默认值，匿名访问关闭。
 

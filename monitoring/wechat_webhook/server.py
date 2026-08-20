@@ -25,6 +25,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("wechat_webhook")
 
+
+class WeChatResponseError(RuntimeError):
+    """The webhook endpoint returned an unusable or rejected response."""
+
 # 没有 URL 就没有告警通道。以前这里只是记一条 warning 然后返回 sent=false，
 # 于是适配器健康、Alertmanager 投递成功、告警却谁也没收到。宁可起不来。
 if not WECHAT_URL:
@@ -96,6 +100,22 @@ def _build_payload(body: dict[str, Any]) -> dict:
     return {"msgtype": "markdown", "markdown": {"content": "\n".join(sections)}}
 
 
+def _require_wechat_success(response: httpx.Response) -> dict[str, Any]:
+    """Require both HTTP success and the Enterprise WeChat business success code."""
+    try:
+        result = response.json()
+    except ValueError as exc:
+        raise WeChatResponseError("upstream returned invalid JSON") from exc
+    if not isinstance(result, dict):
+        raise WeChatResponseError("upstream returned a non-object JSON response")
+
+    errcode = result.get("errcode")
+    if errcode != 0:
+        errmsg = str(result.get("errmsg", ""))[:200]
+        raise WeChatResponseError(f"errcode={errcode!r} errmsg={errmsg!r}")
+    return result
+
+
 @app.post("/webhook")
 async def receive(request: Request) -> JSONResponse:
     try:
@@ -103,8 +123,14 @@ async def receive(request: Request) -> JSONResponse:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"invalid json: {exc}") from exc
 
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="payload must be a JSON object")
+    alerts = body.get("alerts", [])
+    if not isinstance(alerts, list) or not all(isinstance(alert, dict) for alert in alerts):
+        raise HTTPException(status_code=400, detail="alerts must be an array of objects")
+
     status = body.get("status", "unknown")
-    n = len(body.get("alerts", []))
+    n = len(alerts)
     logger.info("received status=%s alerts=%d", status, n)
 
     payload = _build_payload(body)
@@ -112,11 +138,15 @@ async def receive(request: Request) -> JSONResponse:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(WECHAT_URL, json=payload)
             resp.raise_for_status()
+            _require_wechat_success(resp)
         logger.info("sent status=%s alerts=%d wechat_status=%d", status, n, resp.status_code)
         return JSONResponse({"sent": True, "status": status, "alerts": n})
     except httpx.HTTPStatusError as exc:
         logger.error("wechat returned %d: %s", exc.response.status_code, exc.response.text[:200])
         raise HTTPException(status_code=502, detail="upstream error") from exc
+    except WeChatResponseError as exc:
+        logger.error("wechat rejected message: %s", str(exc)[:300])
+        raise HTTPException(status_code=502, detail="upstream rejected message") from exc
     except Exception as exc:
         logger.error("send failed: %s", exc)
         raise HTTPException(status_code=502, detail="send failed") from exc

@@ -38,6 +38,8 @@ _*.py
 
 # Docker / 容器化
 certs/
+/certbot/www/*
+!/certbot/www/.gitkeep
 frontend/dist/
 
 # 监控栈运行时数据（由 Docker 卷管理）

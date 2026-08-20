@@ -24,6 +24,13 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY backend/ ./backend/
 COPY enterprise_rag/ ./enterprise_rag/
 COPY config/ ./config/
+COPY scripts/ ./scripts/
+
+# 生产初始化、备份和外部健康检查都依赖这些脚本。镜像构建时即验证，
+# 避免部署后才发现运维入口缺失。
+RUN test -f /app/scripts/create_user.py \
+    && test -f /app/scripts/backup.py \
+    && test -f /app/scripts/health_check.py
 
 # 数据目录占位；运行时由 compose 卷覆盖，不在镜像内存储任何状态
 RUN mkdir -p /app/data/logs /app/backups
@@ -33,11 +40,12 @@ ENV RAG_DATA_DIR=/app/data \
     RAG_BACKUP_DIR=/app/backups \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    HF_HOME=/app/model_cache
+    HF_HOME=/app/model_cache \
+    PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
 # workers=1 写死，防止误扩容破坏进程内单例
-CMD ["uv", "run", "uvicorn", "backend.main:app", \
+CMD ["uvicorn", "backend.main:app", \
      "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
 
 # ─── Stage 3: Nginx 前端服务 ─────────────────────────────────────────────────

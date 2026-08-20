@@ -41,6 +41,8 @@ services:
     volumes:
       # 生产 HTTPS：挂载证书目录（宿主机 ./certs/ 需包含 fullchain.pem + privkey.pem）
       - ./certs:/etc/nginx/certs:ro
+      # Certbot --webroot 与 nginx 共享 challenge 目录；nginx 只读即可
+      - ./certbot/www:/var/www/certbot:ro
     depends_on:
       backend:
         condition: service_healthy
@@ -122,6 +124,8 @@ services:
     depends_on:
       monitoring-preflight:
         condition: service_completed_successfully
+      wechat-webhook:
+        condition: service_healthy
     restart: unless-stopped
     expose:
       - "9093"
@@ -136,6 +140,16 @@ services:
     depends_on:
       monitoring-preflight:
         condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:5001/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
     expose:
       - "5001"

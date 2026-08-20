@@ -30,6 +30,7 @@ frontend/node_modules/
 .env
 enterprise_rag/.env
 certs/
+certbot/
 
 # Git
 .git/

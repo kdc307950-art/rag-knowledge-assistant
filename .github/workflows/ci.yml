@@ -58,3 +58,18 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  deployment-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare non-secret configuration
+        run: |
+          cp .env.example .env
+          mkdir -p certs certbot/www
+
+      - name: Validate Compose contracts
+        run: |
+          docker compose config --quiet
+          docker compose --profile monitoring config --quiet

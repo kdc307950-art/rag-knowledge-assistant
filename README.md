@@ -350,9 +350,11 @@ data/                     所有运行数据的默认根目录
 - 配置好 `.env`（从 `.env.example` 复制并填写）
 - HTTPS 证书放入 `certs/fullchain.pem` 和 `certs/privkey.pem`
 
+后端生产镜像固定使用 PyTorch 官方 CPU wheel，不安装 CUDA 运行时；本项目的单机部署契约不声明 GPU 推理支持。Embedding/Reranker 模型文件仍通过 `model_cache` 卷持久化。
+
 ### HTTPS
 
-`nginx.conf` 已启用真实 HTTPS，没有可退回明文的分支：80 端口只保留 ACME 续期路径，其余一律 `301` 跳转到 443；应用入口只在 443 上。证书目录以只读方式挂载到 `/etc/nginx/certs`，**两个证书文件缺失时 nginx 会启动失败**——这是刻意的，生产不允许静默降级到明文 HTTP。
+`nginx.conf` 已启用真实 HTTPS，没有可退回明文的分支：80 端口只保留 ACME 续期路径，其余一律 `301` 跳转到 443；应用入口只在 443 上。证书目录以只读方式挂载到 `/etc/nginx/certs`，**两个证书文件缺失时 nginx 会启动失败**——这是刻意的，生产不允许静默降级到明文 HTTP。`/api/live` 和 `/api/ready` 在公网 Nginx 入口固定返回 `404`；容器健康检查直接访问 backend，不受影响。
 
 TLS 侧固定为 TLSv1.2/1.3、仅 ECDHE-AEAD 套件、关闭 session ticket，并下发 HSTS、`X-Content-Type-Options`、`X-Frame-Options: DENY` 和 `Referrer-Policy`。HSTS 是 `.env` 中 `AUTH_COOKIE_SECURE=1` 能成立的前提。`/metrics` 在 nginx 层 `deny all`，只允许 Prometheus 走容器网络抓取。
 
@@ -364,6 +366,18 @@ bash scripts/gen_dev_certs.sh kb.example.com   # 指定域名
 ```
 
 自签证书不被信任，`curl` 需加 `-k`，浏览器会告警。生产请用 Let's Encrypt 或企业 CA 签发的证书覆盖同名文件。
+
+Let's Encrypt 的 HTTP-01 模式使用项目内 `certbot/www/` 作为共享 webroot。Nginx 只读挂载该目录，Certbot 在宿主机写入 challenge：
+
+```bash
+mkdir -p certbot/www certs
+sudo certbot certonly --webroot -w "$PWD/certbot/www" -d kb.example.com
+sudo install -m 0644 /etc/letsencrypt/live/kb.example.com/fullchain.pem certs/fullchain.pem
+sudo install -m 0600 /etc/letsencrypt/live/kb.example.com/privkey.pem certs/privkey.pem
+docker compose exec nginx nginx -s reload
+```
+
+续期任务应在 `certbot renew` 成功后重复两条 `install` 和 `nginx -s reload`。challenge 文件已被 Git 忽略，证书仍只存放在被忽略的 `certs/` 中。
 
 ### 必须在 .env 中设置的生产环境变量
 
@@ -387,12 +401,17 @@ ALERT_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...
 4. `PUBLIC_BASE_URL` 以 `https://` 开头
 5. `ALERT_WEBHOOK_URL` 非空（监控告警渠道已接入）
 6. `AUTH_SECRET` 长度 ≥ 32 字节且无弱密码/重复模式
+7. 用户库可读写且至少存在一个 active admin
 
 ### 启动与停止
 
 ```bash
 # 首次或配置变更后：构建镜像
 docker compose build
+
+# 首次部署：在 rag_data 数据卷中创建管理员（命令会交互式要求密码）
+docker compose run --rm --no-deps backend \
+  python scripts/create_user.py admin --department general --role admin
 
 # 后台启动（process guardian 由 restart: unless-stopped 承担）
 docker compose up -d
@@ -410,12 +429,12 @@ Chroma/HNSW 不支持在线热快照，备份前必须停写：
 
 ```bash
 docker compose stop backend
-docker compose run --rm backend \
+docker compose run --rm --no-deps backend \
   python scripts/backup.py create --confirm-stopped
 docker compose start backend
 ```
 
-恢复同理：先停止 backend，运行 restore，再启动。备份数据存储在 `rag_backups` Docker 卷（宿主机路径见 `docker volume inspect`）。
+恢复同理：先停止 backend，使用 `docker compose run --rm --no-deps backend python scripts/backup.py restore ... --confirm-stopped --confirm-replace`，确认成功后再启动。备份数据存储在 `rag_backups` Docker 卷（宿主机路径见 `docker volume inspect`）。
 
 ## 监控栈
 
@@ -441,7 +460,7 @@ GRAFANA_ADMIN_PASSWORD=<自定义密码，不能是 changeme/admin/password>
 | --- | --- | --- |
 | `monitoring-preflight` 服务 | 三个变量任一为空，或 Grafana 口令是 `changeme`/`admin`/`password` | 退出码 1；其余四个服务都 `depends_on: service_completed_successfully`，整个 profile 拒绝启动 |
 | `monitoring/prometheus/entrypoint.sh` | `METRICS_TOKEN` 为空 | 直接退出，不再写空 token 文件（那会让每次 scrape 都被后端 401，时间序列全空） |
-| `monitoring/wechat_webhook/server.py` | `ALERT_WEBHOOK_URL` 为空 | 启动时 `SystemExit`，不再是记一条 warning 后返回 `sent=false`（那会让告警投递“成功”但无人收到） |
+| `monitoring/wechat_webhook/server.py` | `ALERT_WEBHOOK_URL` 为空，或企业微信返回非 JSON / `errcode != 0` | 缺配置时启动失败；业务拒绝时向 Alertmanager 返回 `502` 触发重试，不把 HTTP 200 误报为发送成功 |
 
 preflight 只在 `--profile monitoring` 内生效，不带该 profile 的主服务启动不受影响。
 
@@ -646,6 +665,8 @@ Get-Content "$env:RAG_DATA_DIR\logs\error.log" -Tail 50
 - React G2/起草成功提交、鉴权失败提示和失败后重试状态
 - DashScope 专用 Key 与通用 OpenAI 兼容 Key 的选择规则
 - 在线、离线缓存、本地模型目录和缺失模型的就绪检测
+- 容器必需运维脚本、Nginx 公网探针隔离、ACME webroot 和上传代理余量
+- 企业微信 HTTP 成功与业务 `errcode` 成功的双重校验
 
 测试基线以当前机器实际执行的 `uv run pytest tests -q` 输出为准；不要手工复制旧的通过数。交付记录应写入本轮实测结果。warning 若仍出现，来自 FastAPI/Starlette 与 httpx 的兼容提示。
 
