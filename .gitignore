@@ -7,6 +7,9 @@ __pycache__/
 .venv/
 .idea/
 
+# AI 工具本地配置（Claude Code 等，不入库）
+.claude/
+
 # Secrets
 .env
 enterprise_rag/.env
