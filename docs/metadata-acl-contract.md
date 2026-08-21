@@ -1,5 +1,9 @@
 # Metadata and ACL Contract
 
+> Document version: `0.1`
+> Applies to application version: `0.1.0`
+> Last reviewed: `2026-08-21`
+
 Metadata filters improve retrieval organization. ACL is enforced before vector
 or BM25 candidates are returned to the retriever; a caller never supplies its
 own effective visibility filter.

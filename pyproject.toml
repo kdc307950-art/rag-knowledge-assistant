@@ -20,21 +20,17 @@ dependencies = [
     "rank-bm25==0.2.2",
     "jieba==0.42.1",
     "numpy==1.26.4",
-    "scipy==1.13.1",
-    "pandas==2.0.3",
-    "pyarrow==15.0.0",
-    "opencv-python-headless==4.9.0.80",
     "typing-extensions==4.16.0",
     "click==8.4.2",
     "regex==2026.7.19",
     "packaging==23.2",
     "protobuf==7.35.1",
-    "bleach==6.4.0",
-    "Markdown==3.10.3",
     "markdown-it-py==4.2.0",
     "onnxruntime==1.23.2",
     "fastapi>=0.141.1",
     "cryptography>=44,<46",
+    # Windows 不提供系统 IANA 时区库；DeepSeek 分时计价需要 Asia/Shanghai。
+    "tzdata>=2025.2; sys_platform == 'win32'",
 ]
 
 [dependency-groups]

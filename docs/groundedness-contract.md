@@ -1,5 +1,9 @@
 # Groundedness Contract
 
+> Document version: `0.1`
+> Applies to application version: `0.1.0`
+> Last reviewed: `2026-08-21`
+
 This document defines the first, non-destructive groundedness check. It is an
 offline evaluation contract, not a claim that every generated answer is proven
 to be factually complete.

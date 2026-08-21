@@ -1,6 +1,14 @@
 {
     "pythonVersion": "3.10",
-    "include": ["."],
+    "venvPath": ".",
+    "venv": ".venv",
+    "include": [
+        "backend",
+        "enterprise_rag",
+        "monitoring/wechat_webhook",
+        "scripts",
+        "tests"
+    ],
     "exclude": ["**/__pycache__"],
     "executionEnvironments": [
         {

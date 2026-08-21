@@ -25,6 +25,23 @@ def test_linux_production_uses_cpu_only_pytorch_index():
     assert 'url = "https://download.pytorch.org/whl/cpu"' in project
 
 
+def test_retired_streamlit_dependencies_are_not_direct_requirements():
+    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    retired = {
+        "bleach",
+        "markdown",
+        "opencv-python-headless",
+        "pandas",
+        "pyarrow",
+        "scipy",
+    }
+    direct_requirements = {
+        match.group(1).lower()
+        for match in re.finditer(r'^\s*"([A-Za-z0-9_.-]+)(?:\[[^]]+\])?(?:[<>=!~].*)?",$', project, re.MULTILINE)
+    }
+    assert retired.isdisjoint(direct_requirements)
+
+
 def test_public_nginx_hides_internal_probes_and_leaves_upload_envelope():
     nginx = (ROOT / "nginx.conf").read_text(encoding="utf-8")
     assert re.search(r"location\s*=\s*/api/live\s*{\s*return\s+404;", nginx)
