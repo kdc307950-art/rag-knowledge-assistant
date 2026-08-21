@@ -1,5 +1,9 @@
 # 运维契约
 
+> 文档版本：`0.2`
+> 适用应用版本：`0.1.0`
+> 最近核对：`2026-08-21`
+
 本文档是单机、单进程 React + FastAPI 部署的可观测性边界。它支持本地用户和文档 ACL，但不是多租户或多实例生产承诺，也不把“指标存在”当成“系统一定可用”。
 
 ## SLO 与保留期
@@ -19,7 +23,7 @@
 
 - `GET /api/live`：不鉴权，进程存活时返回 `200 {"ok": true}`。
 - `GET /api/ready`：不鉴权；除 embedding/reranker、向量库和 manifest 外，检查部署鉴权契约。`dev` 返回 `200` 和 `auth.warning=authentication_disabled`；`single_user` 缺 `APP_PASSWORD`，或 `multi_user` 缺 `AUTH_SECRET`、用户库不可读写、角色数据异常、没有 active admin 时返回 `503`。在线模式把“可从配置的 Hub 下载”视为可用，不主动下载模型。空知识库是合法状态，更新窗口返回 `200` 且状态为 `updating`。
-- `GET /metrics`：优先使用独立 `METRICS_TOKEN`。未配置 token 时只允许 loopback，不能把 `APP_PASSWORD` 的本地 fail-open 规则复制到公网。
+- `GET /metrics`：优先使用独立 `METRICS_TOKEN`。Prometheus 用 `Authorization: Bearer <token>` 发送，手动 curl 用 `X-Metrics-Token: <token>`。未配置 token 时只允许 loopback，不能把 `APP_PASSWORD` 的本地 fail-open 规则复制到公网。
 - 每个 HTTP 响应带服务端生成的 `X-Request-Id`。客户端传入的同名 header 不会被信任。
 
 ## 日志与隐私
@@ -48,11 +52,23 @@ Chroma/HNSW 没有本项目可依赖的在线热快照契约。创建或恢复�
 
 若启用质量反馈，生产部署还必须配置独立的 Fernet key、每日执行保留期清理，并把 `quality.sqlite3` 纳入同一受控备份域。密钥丢失会使历史问题和回答不可解密，不能通过重置应用恢复。
 
-反向代理不得把 `/api/live`、`/api/ready` 直接暴露给公网；它们应仅供本机或受控监控网段访问。若代理 `/metrics`，必须配置 `METRICS_TOKEN`，因为反向代理的 loopback 来源会绕过“仅本机”判断。
+反向代理不得把 `/api/live`、`/api/ready` 直接暴露给公网；它们应仅供本机或受控监控网段访问。compose 自带的 nginx 对这两个精确路径固定返回 `404`，backend 容器健康检查直接访问自身的 `/api/ready`。若代理 `/metrics`，必须配置 `METRICS_TOKEN`，因为反向代理的 loopback 来源会绕过“仅本机”判断。compose 自带的 nginx 直接 `deny all` 拒绝 `/metrics`，Prometheus 走容器网络抓取，不经过公网入口。
+
+Compose 部署由 nginx 终止 TLS：443 是唯一的应用入口，80 仅保留 `/.well-known/acme-challenge/` 用于 ACME 续期，其余一律 `301` 到 HTTPS。宿主机 `./certbot/www/` 以只读方式挂载到 nginx 的 `/var/www/certbot`，Certbot `--webroot` 使用同一目录写入 challenge。只启用 TLS 1.2/1.3，附带 HSTS 及三个常规安全响应头。证书从宿主机 `./certs/` 只读挂载，必须同时存在 `fullchain.pem` 与 `privkey.pem`；缺失时 nginx 直接启动失败，不会降级成明文 HTTP 服务——这是刻意的，静默的 HTTP 回退比起不来更危险。本地验收可用 `scripts/gen_dev_certs.sh` 生成自签证书，生产必须替换为受信任 CA 签发的证书。
+
+## 监控栈边界
+
+监控栈是 `--profile monitoring` 的可选组件，默认不启动，也不影响主服务。
+
+`monitoring-preflight` 是整个 profile 的前置闸门：`METRICS_TOKEN`、`ALERT_WEBHOOK_URL`、`GRAFANA_ADMIN_PASSWORD` 任一为空，或 Grafana 口令使用 `changeme`/`admin`/`password`，则该容器退出 1，其余四个服务因 `service_completed_successfully` 全部停在 `Created` 不启动。Prometheus 和企业微信适配器各自还有一道容器内校验，缺 token 或缺 webhook 时同样拒绝启动；Alertmanager 还会等待适配器健康检查通过。企业微信即使返回 HTTP 200，只要响应不是合法 JSON 或 `errcode != 0`，适配器仍返回 `502` 让 Alertmanager 重试。所有闸门都是宁可起不来或明确失败：一个抓不到数据或丢弃告警的监控栈会让人误以为有覆盖。
+
+端口暴露边界：只有 Grafana 绑定宿主机端口，且限定 `127.0.0.1:3000`，运维通过 SSH 隧道访问（`ssh -N -L 3000:127.0.0.1:3000 <user>@<host>`）。Prometheus、Alertmanager 和 webhook 适配器只在容器网络内 `expose`，没有宿主机端口，不可从公网直达。Grafana 管理员口令无默认值，匿名访问关闭。
+
+企业微信通道与外部检查的 webhook 一样是尽力而为的通知渠道：适配器只把 Alertmanager 的 payload 转成群机器人 markdown，自身不重试也不落库，失败时返回 `502` 交由 Alertmanager 按 `group_interval`/`repeat_interval` 重发。群机器人长时间不可达期间的通知会直接丢失，本地台账仍是唯一可追溯记录。
 
 ## 外部检查
 
-由 Windows 任务计划每 5 分钟运行。任务不会由应用自动注册；需要显式安装或卸载。
+仓库当前只提供 Windows 任务计划注册脚本，默认每 5 分钟运行。任务不会由应用自动注册；需要显式安装或卸载。Linux 生产部署如需复用 `health_check.py`，必须由部署方在进程外调度并记录调度器自身的监控方式；仓库当前没有 Linux 安装脚本。
 
 该检查只是“应用进程外、同一台主机内”的监督：当前任务以交互用户身份运行，用户未登录、Windows/任务计划停止、主机断电或网络整体中断时无法自行发送告警。需要覆盖整机可用性时，应另配远端探测；不要把本脚本误当成主机外监控。
 

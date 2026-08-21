@@ -1,5 +1,9 @@
 # Retrieval Evaluation
 
+> Document version: `0.1`
+> Applies to application version: `0.1.0`
+> Last reviewed: `2026-08-21`
+
 `scripts/eval_retrieval.py` is an explicit offline regression command. It
 calls `retrieve_context()` directly and never invokes query rewriting or the
 LLM. Do not add the recovered Chroma text to Git: the snapshot contains only a

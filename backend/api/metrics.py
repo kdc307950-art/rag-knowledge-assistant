@@ -23,9 +23,13 @@ def _is_loopback(request: Request) -> bool:
 async def metrics_endpoint(
     request: Request,
     x_metrics_token: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
 ):
     if METRICS_TOKEN:
-        if not x_metrics_token or not hmac.compare_digest(x_metrics_token, METRICS_TOKEN):
+        # Accept X-Metrics-Token (curl/manual) or Authorization: Bearer <token> (Prometheus).
+        bearer = authorization[7:] if authorization and authorization.lower().startswith("bearer ") else None
+        token = x_metrics_token or bearer
+        if not token or not hmac.compare_digest(token, METRICS_TOKEN):
             raise HTTPException(status_code=401, detail="metrics token required")
     elif not _is_loopback(request):
         raise HTTPException(status_code=403, detail="metrics endpoint is local-only")

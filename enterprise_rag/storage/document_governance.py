@@ -53,6 +53,7 @@ def load_governance(path: Path | str = DOCUMENT_GOVERNANCE_PATH) -> dict[str, An
         raise ValueError(f"文档治理配置 documents 必须是对象: {config_path}")
     authoritative_families: dict[str, str] = {}
     active_unconfirmed_sources: list[str] = []
+    active_reference_sources: list[str] = []
     for source, metadata in documents.items():
         if not isinstance(source, str) or not source.strip() or not isinstance(metadata, dict):
             raise ValueError(f"文档治理配置存在无效来源条目: {source!r}")
@@ -80,10 +81,22 @@ def load_governance(path: Path | str = DOCUMENT_GOVERNANCE_PATH) -> dict[str, An
             authoritative_families[family] = source
         if status == "active" and authority == "unconfirmed":
             active_unconfirmed_sources.append(source)
+        if status == "active" and authority == "reference":
+            active_reference_sources.append(source)
     if policy == "authoritative" and active_unconfirmed_sources:
         raise ValueError(
             "default_retrieval_policy=authoritative 时不能保留 active/unconfirmed 文档: "
             + ", ".join(sorted(active_unconfirmed_sources))
+        )
+    # ``reference`` means "confirmed effective, but not the family's single
+    # authority".  Under ``authoritative`` those sources stop being retrievable,
+    # so accepting this combination would silently shrink the knowledge base
+    # instead of surfacing the unresolved authority decision.
+    if policy == "authoritative" and active_reference_sources:
+        raise ValueError(
+            "default_retrieval_policy=authoritative 时 active/reference 文档会被静默排除；"
+            "请先按证据包流程决定权威来源，或保持 all_active: "
+            + ", ".join(sorted(active_reference_sources))
         )
     return payload
 

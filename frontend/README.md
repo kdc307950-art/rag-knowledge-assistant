@@ -1,5 +1,9 @@
 # React Frontend
 
+> Document version: `0.1`
+> Applies to application version: `0.1.0`
+> Last reviewed: `2026-08-21`
+
 React + TypeScript + Vite client for the FastAPI API at `http://127.0.0.1:8000`.
 
 ```powershell

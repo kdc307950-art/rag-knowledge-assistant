@@ -1,0 +1,162 @@
+"""企业微信机器人 Webhook 适配器。
+
+接收 Alertmanager 标准 webhook payload，转换为企业微信机器人 Markdown 消息格式，
+再发往 ALERT_WEBHOOK_URL。firing 和 resolved 两类事件均支持。
+"""
+from __future__ import annotations
+
+import logging
+import os
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+import httpx
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+import uvicorn
+
+
+WECHAT_URL = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger("wechat_webhook")
+
+
+class WeChatResponseError(RuntimeError):
+    """The webhook endpoint returned an unusable or rejected response."""
+
+# 没有 URL 就没有告警通道。以前这里只是记一条 warning 然后返回 sent=false，
+# 于是适配器健康、Alertmanager 投递成功、告警却谁也没收到。宁可起不来。
+if not WECHAT_URL:
+    raise SystemExit(
+        "wechat-webhook 启动被拒绝：ALERT_WEBHOOK_URL 为空，告警将无处投递。\n"
+        "请在 .env 中设置企业微信机器人 webhook URL 后重试。"
+    )
+
+app = FastAPI(title="wechat-webhook", docs_url=None, redoc_url=None)
+
+_SEVERITY_ICON = {"critical": "🚨", "warning": "⚠️", "info": "ℹ️"}
+_BEIJING = timezone(timedelta(hours=8))
+
+
+def _fmt_time(iso: str) -> str:
+    if not iso or iso.startswith("0001"):
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(_BEIJING)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return iso
+
+
+def _render_alert(alert: dict[str, Any]) -> str:
+    status = alert.get("status", "firing")
+    labels = alert.get("labels", {})
+    ann = alert.get("annotations", {})
+
+    name = labels.get("alertname", "Unknown")
+    severity = labels.get("severity", "warning")
+    summary = ann.get("summary", name)
+    description = ann.get("description", "")
+
+    if status == "resolved":
+        icon = "✅"
+        badge = "已恢复"
+    else:
+        icon = _SEVERITY_ICON.get(severity, "⚠️")
+        badge = "触发告警"
+
+    lines = [f"{icon} **[{badge}] {name}**", f"> {summary}"]
+    if description:
+        lines.append(f"> {description}")
+    lines.append(f"> 级别: `{severity}`")
+
+    starts = _fmt_time(alert.get("startsAt", ""))
+    if starts:
+        lines.append(f"> 开始: {starts} (北京)")
+    if status == "resolved":
+        ends = _fmt_time(alert.get("endsAt", ""))
+        if ends:
+            lines.append(f"> 恢复: {ends} (北京)")
+
+    return "\n".join(lines)
+
+
+def _build_payload(body: dict[str, Any]) -> dict:
+    status = body.get("status", "firing")
+    alerts: list[dict] = body.get("alerts", [])
+
+    header = "🔴 **RAG 告警通知**" if status != "resolved" else "✅ **RAG 恢复通知**"
+    sections = [header, ""]
+    for i, alert in enumerate(alerts):
+        sections.append(_render_alert(alert))
+        if i < len(alerts) - 1:
+            sections.append("\n---")
+
+    return {"msgtype": "markdown", "markdown": {"content": "\n".join(sections)}}
+
+
+def _require_wechat_success(response: httpx.Response) -> dict[str, Any]:
+    """Require both HTTP success and the Enterprise WeChat business success code."""
+    try:
+        result = response.json()
+    except ValueError as exc:
+        raise WeChatResponseError("upstream returned invalid JSON") from exc
+    if not isinstance(result, dict):
+        raise WeChatResponseError("upstream returned a non-object JSON response")
+
+    errcode = result.get("errcode")
+    if errcode != 0:
+        errmsg = str(result.get("errmsg", ""))[:200]
+        raise WeChatResponseError(f"errcode={errcode!r} errmsg={errmsg!r}")
+    return result
+
+
+@app.post("/webhook")
+async def receive(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"invalid json: {exc}") from exc
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="payload must be a JSON object")
+    alerts = body.get("alerts", [])
+    if not isinstance(alerts, list) or not all(isinstance(alert, dict) for alert in alerts):
+        raise HTTPException(status_code=400, detail="alerts must be an array of objects")
+
+    status = body.get("status", "unknown")
+    n = len(alerts)
+    logger.info("received status=%s alerts=%d", status, n)
+
+    payload = _build_payload(body)
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(WECHAT_URL, json=payload)
+            resp.raise_for_status()
+            _require_wechat_success(resp)
+        logger.info("sent status=%s alerts=%d wechat_status=%d", status, n, resp.status_code)
+        return JSONResponse({"sent": True, "status": status, "alerts": n})
+    except httpx.HTTPStatusError as exc:
+        logger.error("wechat returned %d: %s", exc.response.status_code, exc.response.text[:200])
+        raise HTTPException(status_code=502, detail="upstream error") from exc
+    except WeChatResponseError as exc:
+        logger.error("wechat rejected message: %s", str(exc)[:300])
+        raise HTTPException(status_code=502, detail="upstream rejected message") from exc
+    except Exception as exc:
+        logger.error("send failed: %s", exc)
+        raise HTTPException(status_code=502, detail="send failed") from exc
+
+
+@app.get("/health")
+async def health() -> JSONResponse:
+    # 进程能起来就意味着 URL 已配置（见模块顶部的启动闸门）
+    return JSONResponse({"ok": True, "webhook_configured": True})
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=5001, log_config=None)

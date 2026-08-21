@@ -185,6 +185,8 @@ def production_security_error() -> str | None:
         return "AUTH_COOKIE_SECURE 必须为 1"
     if not PUBLIC_BASE_URL.lower().startswith("https://"):
         return "PUBLIC_BASE_URL 必须使用 HTTPS"
+    if not ALERT_WEBHOOK_URL:
+        return "生产环境必须配置 ALERT_WEBHOOK_URL（监控告警通知渠道）"
     return _production_secret_error(AUTH_SECRET)
 
 

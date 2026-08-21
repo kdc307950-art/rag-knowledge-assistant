@@ -1,0 +1,32 @@
+global:
+  # 同一告警连续触发时，resolve_timeout 后视为已恢复
+  resolve_timeout: 5m
+
+route:
+  receiver: wechat
+  group_by: [alertname, severity]
+  group_wait: 30s        # 等待同组其他告警聚合
+  group_interval: 5m     # 同组告警再次发送的最小间隔
+  repeat_interval: 1h    # 未恢复告警重复通知间隔
+
+  routes:
+    - matchers:
+        - severity = critical
+      receiver: wechat
+      repeat_interval: 30m   # critical 更频繁重复
+
+receivers:
+  - name: wechat
+    webhook_configs:
+      - url: 'http://wechat-webhook:5001/webhook'
+        send_resolved: true   # 恢复时发送 resolved 通知
+        http_config:
+          follow_redirects: true
+
+inhibit_rules:
+  # 服务宕机时抑制其他 warning 告警（避免告警风暴）
+  - source_matchers:
+      - alertname = RagServiceDown
+    target_matchers:
+      - severity = warning
+    equal: [job]

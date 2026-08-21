@@ -7,6 +7,9 @@ __pycache__/
 .venv/
 .idea/
 
+# AI 工具本地配置（Claude Code 等，不入库）
+.claude/
+
 # Secrets
 .env
 enterprise_rag/.env
@@ -35,3 +38,12 @@ pure_chroma_probe/
 /_*.py
 _*.py
 .pytest-tmp-*
+
+# Docker / 容器化
+certs/
+/certbot/www/*
+!/certbot/www/.gitkeep
+frontend/dist/
+
+# 监控栈运行时数据（由 Docker 卷管理）
+monitoring/grafana/data/

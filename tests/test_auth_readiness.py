@@ -80,6 +80,7 @@ def test_production_multi_user_requires_secure_cookie_and_https(monkeypatch, tmp
     assert result["code"] == "production_security_not_ready"
     monkeypatch.setattr(config, "AUTH_COOKIE_SECURE", True)
     monkeypatch.setattr(config, "PUBLIC_BASE_URL", "https://example.test")
+    monkeypatch.setattr(config, "ALERT_WEBHOOK_URL", "https://hook.example.test/webhook")
     result = config.auth_readiness()
     assert result["configured"] is True
 
@@ -178,6 +179,7 @@ def test_production_cookie_post_rejects_wrong_origin(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "AUTH_SECRET", "A9f4xQ2mL7pR5vT8zK3nW6cH1sD0eY4u")
     monkeypatch.setattr(config, "AUTH_COOKIE_SECURE", True)
     monkeypatch.setattr(config, "PUBLIC_BASE_URL", "https://kb.example.test")
+    monkeypatch.setattr(config, "ALERT_WEBHOOK_URL", "https://hook.example.test/webhook")
     monkeypatch.setattr(auth, "DEPLOYMENT_MODE", "multi_user")
     monkeypatch.setattr(auth, "AUTH_MODE", "users")
     monkeypatch.setattr(auth, "AUTH_SECRET", "A9f4xQ2mL7pR5vT8zK3nW6cH1sD0eY4u")
@@ -220,6 +222,7 @@ def test_production_cookie_post_allows_public_origin(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "AUTH_SECRET", secret)
     monkeypatch.setattr(config, "AUTH_COOKIE_SECURE", True)
     monkeypatch.setattr(config, "PUBLIC_BASE_URL", "https://kb.example.test")
+    monkeypatch.setattr(config, "ALERT_WEBHOOK_URL", "https://hook.example.test/webhook")
     monkeypatch.setattr(auth, "DEPLOYMENT_MODE", "multi_user")
     monkeypatch.setattr(auth, "AUTH_MODE", "users")
     monkeypatch.setattr(auth, "AUTH_SECRET", secret)

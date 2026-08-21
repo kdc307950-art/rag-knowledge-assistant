@@ -13,25 +13,24 @@ dependencies = [
     "python-docx==1.2.0",
     "langchain-text-splitters==1.1.2",
     "sentence-transformers==5.7.0",
+    # 生产容器是 CPU 推理；显式依赖配合下方 source，避免 Linux 从 PyPI
+    # 拉取 PyTorch 的整套 CUDA 运行时。Windows 本地仍使用默认索引。
+    "torch==2.13.0",
     "chromadb==1.5.9",
     "rank-bm25==0.2.2",
     "jieba==0.42.1",
     "numpy==1.26.4",
-    "scipy==1.13.1",
-    "pandas==2.0.3",
-    "pyarrow==15.0.0",
-    "opencv-python-headless==4.9.0.80",
     "typing-extensions==4.16.0",
     "click==8.4.2",
     "regex==2026.7.19",
     "packaging==23.2",
     "protobuf==7.35.1",
-    "bleach==6.4.0",
-    "Markdown==3.10.3",
     "markdown-it-py==4.2.0",
     "onnxruntime==1.23.2",
     "fastapi>=0.141.1",
     "cryptography>=44,<46",
+    # Windows 不提供系统 IANA 时区库；DeepSeek 分时计价需要 Asia/Shanghai。
+    "tzdata>=2025.2; sys_platform == 'win32'",
 ]
 
 [dependency-groups]
@@ -51,3 +50,13 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-name = "enterprise_rag"
 module-root = ""
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
