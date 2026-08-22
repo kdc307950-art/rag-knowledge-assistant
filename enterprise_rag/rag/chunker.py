@@ -5,6 +5,8 @@ from enterprise_rag.config import PARENT_CHUNK_SIZE, PARENT_OVERLAP, CHILD_CHUNK
 
 def split_by_chapters(text: str):
     # 优先按章节保留业务结构；没有明显章节时再按全文递归切分。
+    # 注意：法条内列举项「（一）物证；」以分号/句号结尾，不能误判为章节标题；
+    # 真正的节标题（如「（一）一般规定」）不以标点结尾。
     pattern = r"""
     (
     ^第[一二三四五六七八九十\d]+[章节].*
@@ -13,7 +15,7 @@ def split_by_chapters(text: str):
     |
     ^\d+\..*
     |
-    ^（[一二三四五六七八九十]+）.*
+    ^（[一二三四五六七八九十]+）[^；。！？]*$
     )
     """
     lines = text.split("\n")
