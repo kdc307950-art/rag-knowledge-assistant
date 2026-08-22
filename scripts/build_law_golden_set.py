@@ -86,11 +86,11 @@ CASES = [
     ("xzcf_002", "行政处罚的定义？", [(XZCF, "第二条")], ["law", "administrative", "factual", "easy"], False),
     ("xzcf_003", "违法行为在几年内未被发现的，不再给予行政处罚？", [(XZCF, "第三十六条")], ["law", "administrative", "factual", "medium"], False),
     # —— 行政复议法 ——
-    ("xzfuyi_001", "对行政处罚不服如何申请行政复议？", [(XZFYY, "第二条")], ["law", "administrative", "factual", "medium"], False),
+    ("xzfuyi_001", "什么是行政复议？", [(XZFYY, "第二条")], ["law", "administrative", "factual", "medium"], False),
     ("xzfuyi_002", "申请行政复议的期限是多久？", [(XZFYY, "第二十条")], ["law", "administrative", "factual", "medium"], False),
     ("xzfuyi_003", "行政复议机关收到行政复议申请后应当如何处理？", [(XZFYY, "第三十条")], ["law", "administrative", "factual", "medium"], False),
     # —— 刑诉法解释 ——
-    ("xsjs_001", "人民法院直接受理的自诉案件有哪些？", [(XSJS, "第一条")], ["law", "criminal", "factual", "medium"], False),
+    ("xsjs_001", "人民法院直接受理的自诉案件有哪些？", [(XSSF, "第二百一十条"), (XSJS, "第一条")], ["law", "criminal", "factual", "medium", "equivalent"], False),
     ("xsjs_002", "辩护律师如何同在押的被告人会见和通信？", [(XSSF, "第三十九条"), (XSJS, "第五十六条")], ["law", "criminal", "factual", "medium", "equivalent"], False),
     # —— 跨文档：刑诉法 + 刑诉法解释 ——
     ("cross_003", "辩护律师可以同在押的犯罪嫌疑人、被告人会见和通信吗？", [(XSSF, "第三十九条"), (XSJS, "第五十六条")], ["law", "criminal", "cross_document", "hard"], False),
@@ -143,7 +143,7 @@ def main() -> int:
                 missing.append(f"{case_id}: {source}/{article}")
                 ok = False
                 break
-            evidence.append({"source": source, "parent_id": pid})
+            evidence.append({"source": source, "parent_id": pid, "article": article})
         if not ok:
             continue
 
