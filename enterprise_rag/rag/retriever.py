@@ -13,6 +13,7 @@ from enterprise_rag.core.exceptions import (
     RetrievalException,
 )
 from .reranker import get_reranker
+from .query_expansion import expand_query
 import logging
 
 try:
@@ -48,14 +49,17 @@ def retrieve_context(
     if top_k is None:
         top_k = FINAL_TOP_K
 
+    # 法律术语 -> 法条原文描述性表述的 query 扩展；术语表为空时等价原 query。
+    expanded_query = expand_query(query)
+
     try:
         with timed_stage("retrieval"):
             search_func = get_search_function()
             if retrieval_policy is None and access_context is None:
-                results = search_func(query, n_results=n_results)
+                results = search_func(expanded_query, n_results=n_results)
             else:
                 results = search_func(
-                    query,
+                    expanded_query,
                     n_results=n_results,
                     **({"retrieval_policy": retrieval_policy} if retrieval_policy is not None else {}),
                     **({"access_context": access_context} if access_context is not None else {}),
@@ -92,7 +96,7 @@ def retrieve_context(
 
     # 交叉编码器精排比向量距离更适合决定是否将片段交给模型回答。
     # 将模型加载和 predict 一起计入 rerank，便于区分 retrieval 与重排瓶颈。
-    pairs = [[query, doc] for doc in docs]
+    pairs = [[expanded_query, doc] for doc in docs]
     with timed_stage("rerank"):
         reranker = get_reranker()
         try:

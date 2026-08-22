@@ -80,6 +80,12 @@ DOCUMENT_GOVERNANCE_PATH = Path(
         str(PROJECT_ROOT / "config" / "document_governance.json"),
     )
 ).expanduser()
+LEGAL_TERMS_PATH = Path(
+    os.getenv(
+        "RAG_LEGAL_TERMS_PATH",
+        str(PROJECT_ROOT / "config" / "legal_terms.json"),
+    )
+).expanduser()
 MODEL_NAME = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
 # DashScope、DeepSeek 与 OpenAI 可能同时配置在同一台机器上。连接已识别的
 # 服务商时优先使用专用变量，避免把其他服务的 OPENAI_API_KEY 误发出去。
