@@ -125,6 +125,68 @@
         }
       },
       "supersedes": []
+    },
+    "刑法.md": {
+      "document_family": "criminal_law",
+      "version": "2023-12-29",
+      "effective_from": "2024-03-01",
+      "effective_to": null,
+      "authority_level": "authoritative",
+      "retrieval_status": "active",
+      "control": {
+        "issuing_department": "全国人民代表大会",
+        "approver": "全国人民代表大会",
+        "approval_reference": "1997年3月14日第八届全国人大第五次会议修订，2023年12月29日刑法修正案（十二）修正",
+        "notice_reference": "中华人民共和国主席令",
+        "replacement_decision": "does_not_replace",
+        "conflict_priority": "刑法为本知识库刑事领域唯一权威法律来源",
+        "evidence_refs": [
+          "http://www.chnlawyer.net/law/subs/xingfa.html"
+        ],
+        "scope": {
+          "legal_entities": [
+            "all"
+          ],
+          "regions": [
+            "中华人民共和国"
+          ],
+          "employee_types": [
+            "all"
+          ]
+        }
+      },
+      "supersedes": []
+    },
+    "刑事诉讼法.md": {
+      "document_family": "criminal_procedure_law",
+      "version": "2018-10-26",
+      "effective_from": "2018-10-26",
+      "effective_to": null,
+      "authority_level": "authoritative",
+      "retrieval_status": "active",
+      "control": {
+        "issuing_department": "全国人民代表大会",
+        "approver": "全国人民代表大会",
+        "approval_reference": "2018年10月26日第十三届全国人大常委会第六次会议第三次修正",
+        "notice_reference": "中华人民共和国主席令",
+        "replacement_decision": "does_not_replace",
+        "conflict_priority": "刑事诉讼法为本知识库刑事诉讼程序领域唯一权威法律来源",
+        "evidence_refs": [
+          "https://www.xinhuanet.com/politics/2018-10/27/c_1123620821_9.htm"
+        ],
+        "scope": {
+          "legal_entities": [
+            "all"
+          ],
+          "regions": [
+            "中华人民共和国"
+          ],
+          "employee_types": [
+            "all"
+          ]
+        }
+      },
+      "supersedes": []
     }
   },
   "notes": [

@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
-"""批量导入律所扩充语料：合同编通则司法解释、公司法、劳动合同法。
+"""导入刑事法律语料：刑法、刑事诉讼法。
 
-每个文档注册 document_governance（authoritative + control 证据包）与
-document_acl，再调用 add_document_to_kb 完成入库与 manifest 原子激活。
+governance/acl 为增量更新（读现有 json 再写回），不影响已导入文档。
 
-用法：uv run python scripts/ingest_law_corpus_extra.py
+用法：uv run python scripts/ingest_criminal_law.py
 """
 from __future__ import annotations
 
@@ -22,63 +21,6 @@ GOVERNANCE_PATH = PROJECT_ROOT / "config" / "document_governance.json"
 ACL_PATH = PROJECT_ROOT / "config" / "document_acl.json"
 
 DOCUMENTS = [
-    {
-        "source": "民法典合同编通则司法解释.md",
-        "file": "corpus/民法典合同编通则司法解释.md",
-        "document_family": "contract_interpretation",
-        "version": "2023-12-05",
-        "effective_from": "2023-12-05",
-        "classification": "technical",
-        "department": "legal",
-        "control": {
-            "issuing_department": "最高人民法院",
-            "approver": "最高人民法院审判委员会",
-            "approval_reference": "法释〔2023〕13号，2023年5月23日最高人民法院审判委员会第1889次会议通过",
-            "notice_reference": "最高人民法院公告，2023年12月4日公布",
-            "replacement_decision": "does_not_replace",
-            "conflict_priority": "对民法典合同编通则的司法解释，与民法典合同编配套适用",
-            "evidence_refs": ["https://www.court.gov.cn/fabu/xiangqing/419382.html"],
-            "scope": {"legal_entities": ["all"], "regions": ["中华人民共和国"], "employee_types": ["all"]},
-        },
-    },
-    {
-        "source": "公司法.md",
-        "file": "corpus/公司法.md",
-        "document_family": "company_law",
-        "version": "2023-12-29",
-        "effective_from": "2024-07-01",
-        "classification": "technical",
-        "department": "legal",
-        "control": {
-            "issuing_department": "全国人民代表大会常务委员会",
-            "approver": "全国人民代表大会常务委员会",
-            "approval_reference": "2023年12月29日第十四届全国人大常委会第七次会议第二次修订",
-            "notice_reference": "中华人民共和国主席令第十五号",
-            "replacement_decision": "does_not_replace",
-            "conflict_priority": "公司法为本知识库公司领域唯一权威法律来源",
-            "evidence_refs": ["https://paper.people.com.cn/rmrb/html/2024-01/02/nw.D110000renmrb_20240102_1-13.htm"],
-            "scope": {"legal_entities": ["all"], "regions": ["中华人民共和国"], "employee_types": ["all"]},
-        },
-    },
-    {
-        "source": "劳动合同法.md",
-        "file": "corpus/劳动合同法.md",
-        "document_family": "labour_contract_law",
-        "version": "2012-12-28",
-        "effective_from": "2013-07-01",
-        "classification": "technical",
-        "department": "legal",
-        "control": {
-            "issuing_department": "全国人民代表大会常务委员会",
-            "approver": "全国人民代表大会常务委员会",
-            "approval_reference": "2007年6月29日通过，2012年12月28日修正",
-            "notice_reference": "中华人民共和国主席令",
-            "replacement_decision": "does_not_replace",
-            "conflict_priority": "劳动合同法为本知识库劳动领域唯一权威法律来源",
-            "evidence_refs": ["http://www.npc.gov.cn/npc/c1773/c2518/c12898/201905/t20190523_46320.html"],
-            "scope": {"legal_entities": ["all"], "regions": ["中华人民共和国"], "employee_types": ["all"]},
-        },
-    },
     {
         "source": "刑法.md",
         "file": "corpus/刑法.md",
@@ -139,7 +81,7 @@ def _acl_entry(doc: dict) -> dict:
         "department": doc["department"],
         "visibility": "all",
         "owner_id": "",
-        "basis": f"{doc['source']}，公开法律/司法解释文本，面向全所。",
+        "basis": f"{doc['source']}，公开法律文本，面向全所。",
     }
 
 
@@ -172,7 +114,7 @@ def main() -> int:
         )
         print(f"  结果: {result}")
 
-    print("全部导入完成。")
+    print("刑事法律导入完成。")
     return 0
 
 

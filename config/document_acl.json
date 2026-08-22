@@ -28,6 +28,20 @@
       "visibility": "all",
       "owner_id": "",
       "basis": "劳动合同法.md，公开法律/司法解释文本，面向全所。"
+    },
+    "刑法.md": {
+      "classification": "technical",
+      "department": "legal",
+      "visibility": "all",
+      "owner_id": "",
+      "basis": "刑法.md，公开法律文本，面向全所。"
+    },
+    "刑事诉讼法.md": {
+      "classification": "technical",
+      "department": "legal",
+      "visibility": "all",
+      "owner_id": "",
+      "basis": "刑事诉讼法.md，公开法律文本，面向全所。"
     }
   },
   "notes": [
