@@ -1,19 +1,33 @@
 {
   "schema_version": 1,
   "documents": {
-    "2025版新劳动合同法下的企业员工手册.md": {
-      "classification": "policy",
-      "department": "hr",
+    "民法典合同编.md": {
+      "classification": "technical",
+      "department": "legal",
       "visibility": "all",
       "owner_id": "",
-      "basis": "2026-08-19 经负责人确认：HR / 人力资源部发布，2025-01-01 生效，面向全体员工，侧重劳动合同法框架。"
+      "basis": "《中华人民共和国民法典》合同编，全国人民代表大会通过，2021-01-01 施行，公开法律文本，面向全所。"
     },
-    "企业员工手册（2025版）.md": {
-      "classification": "policy",
-      "department": "hr",
+    "民法典合同编通则司法解释.md": {
+      "classification": "technical",
+      "department": "legal",
       "visibility": "all",
       "owner_id": "",
-      "basis": "2026-08-19 经负责人确认：HR / 人力资源部发布，2025-01-01 生效，面向全体员工，侧重日常管理规范；文中占位符为脱敏/示范处理。"
+      "basis": "民法典合同编通则司法解释.md，公开法律/司法解释文本，面向全所。"
+    },
+    "公司法.md": {
+      "classification": "technical",
+      "department": "legal",
+      "visibility": "all",
+      "owner_id": "",
+      "basis": "公司法.md，公开法律/司法解释文本，面向全所。"
+    },
+    "劳动合同法.md": {
+      "classification": "technical",
+      "department": "legal",
+      "visibility": "all",
+      "owner_id": "",
+      "basis": "劳动合同法.md，公开法律/司法解释文本，面向全所。"
     }
   },
   "notes": [
