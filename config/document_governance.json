@@ -187,6 +187,99 @@
         }
       },
       "supersedes": []
+    },
+    "行政处罚法.md": {
+      "document_family": "administrative_penalty_law",
+      "version": "2021-01-22",
+      "effective_from": "2021-07-15",
+      "effective_to": null,
+      "authority_level": "authoritative",
+      "retrieval_status": "active",
+      "control": {
+        "issuing_department": "全国人民代表大会常务委员会",
+        "approver": "全国人民代表大会常务委员会",
+        "approval_reference": "2021年1月22日第十三届全国人大常委会第二十五次会议修订",
+        "notice_reference": "中华人民共和国主席令",
+        "replacement_decision": "does_not_replace",
+        "conflict_priority": "行政处罚法为本知识库行政处罚领域唯一权威法律来源",
+        "evidence_refs": [
+          "https://fgk.chinatax.gov.cn/zcfgk/c100009/c5211778/content.html"
+        ],
+        "scope": {
+          "legal_entities": [
+            "all"
+          ],
+          "regions": [
+            "中华人民共和国"
+          ],
+          "employee_types": [
+            "all"
+          ]
+        }
+      },
+      "supersedes": []
+    },
+    "行政复议法.md": {
+      "document_family": "administrative_reconsideration_law",
+      "version": "2023-09-01",
+      "effective_from": "2024-01-01",
+      "effective_to": null,
+      "authority_level": "authoritative",
+      "retrieval_status": "active",
+      "control": {
+        "issuing_department": "全国人民代表大会常务委员会",
+        "approver": "全国人民代表大会常务委员会",
+        "approval_reference": "2023年9月1日第十四届全国人大常委会第五次会议修订",
+        "notice_reference": "中华人民共和国主席令",
+        "replacement_decision": "does_not_replace",
+        "conflict_priority": "行政复议法为本知识库行政复议领域唯一权威法律来源",
+        "evidence_refs": [
+          "https://www.mee.gov.cn/ywgz/fgbz/fl/202312/t20231205_1058240.shtml"
+        ],
+        "scope": {
+          "legal_entities": [
+            "all"
+          ],
+          "regions": [
+            "中华人民共和国"
+          ],
+          "employee_types": [
+            "all"
+          ]
+        }
+      },
+      "supersedes": []
+    },
+    "刑诉法解释.md": {
+      "document_family": "criminal_procedure_interpretation",
+      "version": "2021-02-04",
+      "effective_from": "2021-03-01",
+      "effective_to": null,
+      "authority_level": "authoritative",
+      "retrieval_status": "active",
+      "control": {
+        "issuing_department": "最高人民法院",
+        "approver": "最高人民法院审判委员会",
+        "approval_reference": "法释〔2021〕1号，2020年12月7日最高人民法院审判委员会第1820次会议通过，替代法释〔2012〕21号",
+        "notice_reference": "最高人民法院公告",
+        "replacement_decision": "does_not_replace",
+        "conflict_priority": "刑诉法解释为刑事诉讼审判程序领域唯一权威司法解释，与刑事诉讼法配套适用",
+        "evidence_refs": [
+          "http://www.court.gov.cn/fabu/xiangqing/286491.html"
+        ],
+        "scope": {
+          "legal_entities": [
+            "all"
+          ],
+          "regions": [
+            "中华人民共和国"
+          ],
+          "employee_types": [
+            "all"
+          ]
+        }
+      },
+      "supersedes": []
     }
   },
   "notes": [

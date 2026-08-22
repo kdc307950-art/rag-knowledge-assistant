@@ -42,6 +42,27 @@
       "visibility": "all",
       "owner_id": "",
       "basis": "刑事诉讼法.md，公开法律文本，面向全所。"
+    },
+    "行政处罚法.md": {
+      "classification": "technical",
+      "department": "legal",
+      "visibility": "all",
+      "owner_id": "",
+      "basis": "行政处罚法.md，公开法律/司法解释文本，面向全所。"
+    },
+    "行政复议法.md": {
+      "classification": "technical",
+      "department": "legal",
+      "visibility": "all",
+      "owner_id": "",
+      "basis": "行政复议法.md，公开法律/司法解释文本，面向全所。"
+    },
+    "刑诉法解释.md": {
+      "classification": "technical",
+      "department": "legal",
+      "visibility": "all",
+      "owner_id": "",
+      "basis": "刑诉法解释.md，公开法律/司法解释文本，面向全所。"
     }
   },
   "notes": [
