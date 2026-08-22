@@ -14,6 +14,8 @@ def test_cleaned_output_cache_is_bounded():
     from enterprise_rag.utils import cleaner
 
     maxsize = cleaner._clean_cached.cache_info().maxsize
+    # maxsize 为 None 表示 lru_cache 无上界，本用例的前提就不成立，先断言掉。
+    assert maxsize is not None
     assert maxsize > 0
     for index in range(maxsize + 5):
         cleaner.clean_llm_output(f"answer-{index} unique-{index}")

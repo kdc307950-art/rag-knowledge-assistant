@@ -8,7 +8,7 @@ from pathlib import Path
 import sqlite3
 import threading
 import time
-from typing import Any
+from typing import Any, cast
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -302,7 +302,8 @@ class QualityService:
                 """,
                 (run["run_id"], str(principal_id), normalized_verdict, reason, now),
             )
-            return FeedbackResult("created", int(cursor.lastrowid))
+            # 同 users.py：INSERT 之后 lastrowid 必定有值，typeshed 标注偏保守。
+            return FeedbackResult("created", cast(int, cursor.lastrowid))
 
     def list_feedback_for_review(
         self, *, status: str = "pending", limit: int = 50

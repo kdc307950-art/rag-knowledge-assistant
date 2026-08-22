@@ -13,7 +13,7 @@ import math
 import platform
 import threading
 import time
-from typing import Iterable, Sequence
+from typing import ClassVar, Iterable, Sequence, TypeVar
 
 
 def _escape(value: object) -> str:
@@ -33,6 +33,9 @@ def _labels(labels: Sequence[str], values: Sequence[object]) -> str:
 
 
 class _Metric:
+    # 只声明不赋值：三个子类各自提供取值，基类本身不应被实例化。
+    type_name: ClassVar[str]
+
     def __init__(self, name: str, help_text: str, label_names: Sequence[str]):
         self.name = name
         self.help_text = help_text
@@ -47,6 +50,9 @@ class _Metric:
 
     def clear(self) -> None:
         self._values.clear()
+
+
+_MetricT = TypeVar("_MetricT", bound=_Metric)
 
 
 class _Counter(_Metric):
@@ -146,7 +152,9 @@ class MetricsRegistry:
         self.metrics = self._build_metrics()
         self._started_at = time.time()
 
-    def _register(self, metric: _Metric) -> _Metric:
+    def _register(self, metric: _MetricT) -> _MetricT:
+        # 泛型保留具体子类型（_Counter / _Histogram），否则 _MetricSet 的字段
+        # 拿到的是被擦成基类 _Metric 的返回值，pyright 会报 reportArgumentType。
         self._metrics.append(metric)
         return metric
 

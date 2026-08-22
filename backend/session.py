@@ -39,7 +39,9 @@ def get_or_create_session_id(session_id: str | None, principal_id: str = "local"
         _SESSION_PRINCIPALS[sid] = principal
         _SESSION_TOUCHED[sid] = now
         while len(_SESSION_PRINCIPALS) > SESSION_MAX_COUNT:
-            oldest = min(_SESSION_TOUCHED, key=_SESSION_TOUCHED.get)
+            # 用下标而不是 .get：dict.get 的返回类型是 float | None，不满足 min 的
+            # key 要求可比较；下标取值既通过类型检查，也避免了 None 参与比较。
+            oldest = min(_SESSION_TOUCHED, key=lambda sid: _SESSION_TOUCHED[sid])
             _SESSION_TOUCHED.pop(oldest, None)
             _SESSION_PRINCIPALS.pop(oldest, None)
             _SESSION_HISTORIES.pop(oldest, None)

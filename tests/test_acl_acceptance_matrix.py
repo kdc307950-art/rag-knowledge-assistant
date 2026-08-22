@@ -66,6 +66,7 @@ def test_manifest_revision_filter_enforces_acl_before_retrieval(monkeypatch):
             policy="authoritative",
             access_context=user,
         )
+        assert result is not None
         assert set(result["revision_id"]["$in"]) == expected
 
 

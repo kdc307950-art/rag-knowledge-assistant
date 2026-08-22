@@ -17,7 +17,7 @@ import shutil
 import sqlite3
 import sys
 import time
-from typing import Iterable
+from typing import Any, Iterable
 from uuid import uuid4
 
 
@@ -124,8 +124,8 @@ def _copy_ignore(_directory: str, names: list[str]) -> set[str]:
     return {"upload_staging"} if "upload_staging" in names else set()
 
 
-def _file_records(data_dir: Path) -> list[dict[str, object]]:
-    records: list[dict[str, object]] = []
+def _file_records(data_dir: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
     for path in sorted(item for item in data_dir.rglob("*") if item.is_file()):
         relative = path.relative_to(data_dir).as_posix()
         records.append(
@@ -306,7 +306,7 @@ def _load_manifest(backup_dir: Path) -> dict:
     return payload
 
 
-def verify_backup(backup_dir: Path) -> dict[str, object]:
+def verify_backup(backup_dir: Path) -> dict[str, Any]:
     backup_dir = backup_dir.expanduser().resolve()
     data_dir = backup_dir / "data"
     payload = _load_manifest(backup_dir)

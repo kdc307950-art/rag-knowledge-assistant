@@ -42,11 +42,15 @@ def recover(backup_data_dir: Path, output_dir: Path) -> dict[str, Any]:
             source = str(meta.get("source") or "unknown")
             parent_id = str(meta.get("parent_id") or meta.get("chunk_index") or document)
             parent_text = str(meta.get("parent_text") or document or "")
+            # chroma 的 metadata 值类型是个大 union（含 SparseVector 等），
+            # 但本项目写入的 chunk_index 一定是 int。顺便只转换一次，
+            # 原来同一个表达式在判断和赋值里各算了一遍。
+            chunk_index = int(meta.get("chunk_index") or 0)  # pyright: ignore[reportArgumentType]
             entry = grouped.setdefault(source, {}).get(parent_id)
-            if entry is None or int(meta.get("chunk_index") or 0) < entry["chunk_index"]:
+            if entry is None or chunk_index < entry["chunk_index"]:
                 grouped.setdefault(source, {})[parent_id] = {
                     "text": parent_text,
-                    "chunk_index": int(meta.get("chunk_index") or 0),
+                    "chunk_index": chunk_index,
                     "chapter": meta.get("chapter"),
                     "paragraph": meta.get("paragraph"),
                 }

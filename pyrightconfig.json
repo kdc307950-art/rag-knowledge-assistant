@@ -1,4 +1,10 @@
 {
+    // tests 目录只关掉两条规则，不是整体降级：
+    //   reportArgumentType      —— 测试用 SimpleNamespace / 轻量替身顶替 Request、UploadFile 等
+    //   reportAttributeAccessIssue —— 测试用 monkeypatch 把服务依赖换成替身对象
+    // 这两类是单元测试的固有写法：要它们通过静态检查就等于要求测试构造真实对象。
+    // 其余规则（reportOptional*、reportIndexIssue、reportCallIssue 等）在 tests 下仍然生效，
+    // 它们暴露的是测试自身不严谨（漏断言 Optional），已逐个修掉而不是屏蔽。
     "pythonVersion": "3.10",
     "venvPath": ".",
     "venv": ".venv",
@@ -9,11 +15,23 @@
         "scripts",
         "tests"
     ],
-    "exclude": ["**/__pycache__"],
+    "exclude": [
+        "**/__pycache__"
+    ],
     "executionEnvironments": [
         {
+            "root": "tests",
+            "extraPaths": [
+                "."
+            ],
+            "reportArgumentType": "none",
+            "reportAttributeAccessIssue": "none"
+        },
+        {
             "root": ".",
-            "extraPaths": ["."]
+            "extraPaths": [
+                "."
+            ]
         }
     ]
 }

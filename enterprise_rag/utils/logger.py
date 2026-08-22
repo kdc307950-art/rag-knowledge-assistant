@@ -160,7 +160,9 @@ def _install_exception_hooks() -> None:
         logging.getLogger(f"{PACKAGE_LOGGER_NAME}.unhandled").critical(
             "未捕获的后台线程异常: thread=%s",
             getattr(args.thread, "name", "unknown"),
-            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+            # 直接传异常实例而不是三元组：logging 会自行取出类型和 traceback，
+            # 且 ExceptHookArgs 的三个字段都是 Optional，拼成元组不满足 _ExcInfoType。
+            exc_info=args.exc_value,
         )
         previous_thread_hook(args)
 

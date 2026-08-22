@@ -19,6 +19,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 import chromadb
 
@@ -79,7 +80,7 @@ def load_parent_text_map() -> dict[str, str]:
     return mapping
 
 
-def call_llm(messages: list[dict]) -> str:
+def call_llm(messages: list[Any]) -> str:
     client = get_llm()
     resp = client.chat.completions.create(
         model=LLM_MODEL,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Any, Iterator
 
 from ..rag.retriever import retrieve_context
 
@@ -20,10 +20,13 @@ from .cache_service import CacheService
 try:
     from backend.observability.context import timed_stage
 except Exception:  # pragma: no cover - standalone core imports
-    from contextlib import nullcontext
+    from contextlib import contextmanager
 
-    def timed_stage(_name):
-        return nullcontext()
+    # 装饰器和形参名都要与 backend.observability.context.timed_stage 一致，
+    # 两个分支的类型才对得上（形参名不同也会判为不兼容）。
+    @contextmanager
+    def timed_stage(name: str):
+        yield
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +169,9 @@ class RagService:
 
         # 检索阶段与生成阶段解耦：这里无论问题类型都只负责查库和记录分数。
         try:
-            retrieval_kwargs = {
+            # 显式标注：否则从初始值推断成 dict[str, bool]，后面塞 access_context
+            # 会报类型冲突，并沿 **kwargs 级联到 retrieve_context 的每个形参。
+            retrieval_kwargs: dict[str, Any] = {
                 "return_raw": True,
                 "return_generation": True,
             }
@@ -179,7 +184,10 @@ class RagService:
             else:
                 context, sources, raw_results = retrieval_result
                 generation_reader = getattr(self.cache_service, "get_generation", None)
-                kb_generation = generation_reader() if callable(generation_reader) else None
+                # getattr 拿到的调用结果类型是 object，显式收窄成 int：代际只可能是
+                # 整数，拿到别的（比如测试替身返回 Mock）就当作没有代际。
+                raw_generation = generation_reader() if callable(generation_reader) else None
+                kb_generation = raw_generation if isinstance(raw_generation, int) else None
         except KnowledgeBaseBusyError as exc:
             # 不记录原始问题，避免日志落盘用户完整提问。
             logger.info("知识库更新期间暂停检索: query_length=%d", len(query))

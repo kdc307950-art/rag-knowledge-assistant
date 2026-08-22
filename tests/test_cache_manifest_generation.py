@@ -79,6 +79,7 @@ def test_manifest_commit_naturally_changes_cache_key(tmp_path):
         generation_reader=lambda: manifest.snapshot().generation,
     )
     old_key = service.make_key("问题", "")
+    assert service.persistent_cache is not None
     service.persistent_cache.set(old_key, {"content": "旧答案"})
 
     manifest.commit_source("a.txt", "revision-1", "hash-1", 1)

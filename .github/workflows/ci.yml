@@ -27,7 +27,9 @@ jobs:
       - name: Pyright
         uses: jakebailey/pyright-action@v2
         with:
-          version: "1.1.311"
+          # 固定版本而不是用 latest：pyright 每次发版都可能新增规则，
+          # 不锁版本会让无关的提交突然变红。升级是一次显式动作。
+          version: "1.1.413"
 
       - name: Pytest
         run: uv run pytest tests -q
