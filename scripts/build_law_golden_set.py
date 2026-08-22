@@ -28,6 +28,9 @@ GSF = "公司法.md"                # 公司法
 LDHT = "劳动合同法.md"           # 劳动合同法
 XF = "刑法.md"                   # 刑法
 XSSF = "刑事诉讼法.md"           # 刑事诉讼法
+XZCF = "行政处罚法.md"           # 行政处罚法
+XZFYY = "行政复议法.md"          # 行政复议法
+XSJS = "刑诉法解释.md"           # 刑诉法解释（法释〔2021〕1号）
 
 # (case_id, query, [(source, 目标法条编号), ...], tags, expected_refusal)
 CASES = [
@@ -78,11 +81,25 @@ CASES = [
     ("susong_002", "可以用于证明案件事实的材料有哪些？", [(XSSF, "第五十条")], ["law", "criminal", "factual", "medium"], False),
     ("susong_003", "侦查人员对与犯罪有关的场所、物品、人身、尸体应当如何处理？", [(XSSF, "第一百二十八条")], ["law", "criminal", "factual", "medium"], False),
     ("susong_004", "逮捕犯罪嫌疑人、被告人的条件是什么？", [(XSSF, "第八十一条")], ["law", "criminal", "factual", "medium"], False),
+    # —— 行政处罚法 ——
+    ("xzcf_001", "行政处罚的种类有哪些？", [(XZCF, "第九条")], ["law", "administrative", "factual", "easy"], False),
+    ("xzcf_002", "行政处罚的定义？", [(XZCF, "第二条")], ["law", "administrative", "factual", "easy"], False),
+    ("xzcf_003", "违法行为在几年内未被发现的，不再给予行政处罚？", [(XZCF, "第三十六条")], ["law", "administrative", "factual", "medium"], False),
+    # —— 行政复议法 ——
+    ("xzfuyi_001", "对行政处罚不服如何申请行政复议？", [(XZFYY, "第二条")], ["law", "administrative", "factual", "medium"], False),
+    ("xzfuyi_002", "申请行政复议的期限是多久？", [(XZFYY, "第二十条")], ["law", "administrative", "factual", "medium"], False),
+    ("xzfuyi_003", "行政复议机关收到行政复议申请后应当如何处理？", [(XZFYY, "第三十条")], ["law", "administrative", "factual", "medium"], False),
+    # —— 刑诉法解释 ——
+    ("xsjs_001", "人民法院直接受理的自诉案件有哪些？", [(XSJS, "第一条")], ["law", "criminal", "factual", "medium"], False),
+    ("xsjs_002", "辩护律师如何同在押的被告人会见和通信？", [(XSSF, "第三十九条"), (XSJS, "第五十六条")], ["law", "criminal", "factual", "medium", "equivalent"], False),
+    # —— 跨文档：刑诉法 + 刑诉法解释 ——
+    ("cross_003", "辩护律师可以同在押的犯罪嫌疑人、被告人会见和通信吗？", [(XSSF, "第三十九条"), (XSJS, "第五十六条")], ["law", "criminal", "cross_document", "hard"], False),
     # —— 知识库外严格拒答 ——
     ("refuse_002", "结婚的法定年龄是多少岁？", [], ["law", "refusal", "out_of_scope", "expected_refusal"], True),
     ("refuse_003", "法定继承的第一顺序继承人有哪些？", [], ["law", "refusal", "out_of_scope", "expected_refusal"], True),
     ("refuse_004", "专利侵权损害赔偿数额如何确定？", [], ["law", "refusal", "out_of_scope", "expected_refusal"], True),
-    ("refuse_005", "对行政处罚不服如何申请行政复议？", [], ["law", "refusal", "out_of_scope", "expected_refusal"], True),
+    ("refuse_005", "商标侵权损害赔偿数额如何计算？", [], ["law", "refusal", "out_of_scope", "expected_refusal"], True),
+    ("refuse_006", "个人所得税综合所得适用什么税率？", [], ["law", "refusal", "out_of_scope", "expected_refusal"], True),
 ]
 
 
