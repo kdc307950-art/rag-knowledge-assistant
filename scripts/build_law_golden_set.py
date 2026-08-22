@@ -26,6 +26,8 @@ MFC = "民法典合同编.md"           # 民法典合同编
 SFJS = "民法典合同编通则司法解释.md"  # 合同编通则司法解释
 GSF = "公司法.md"                # 公司法
 LDHT = "劳动合同法.md"           # 劳动合同法
+XF = "刑法.md"                   # 刑法
+XSSF = "刑事诉讼法.md"           # 刑事诉讼法
 
 # (case_id, query, [(source, 目标法条编号), ...], tags, expected_refusal)
 CASES = [
@@ -66,8 +68,17 @@ CASES = [
     # —— 跨文档：法律 + 司法解释 ——
     ("cross_001", "合同条款的解释应当遵循什么规则？", [(MFC, "第四百六十六条"), (SFJS, "第一条")], ["law", "cross_document", "hard"], False),
     ("cross_002", "情势变更如何认定与处理？", [(MFC, "第五百三十三条"), (SFJS, "第三十二条")], ["law", "cross_document", "hard"], False),
-    # —— 合同编外严格拒答 ——
-    ("refuse_001", "故意伤害罪的量刑标准是什么？", [], ["law", "refusal", "out_of_scope", "expected_refusal"], True),
+    # —— 刑法 ——
+    ("xingfa_001", "故意伤害他人身体的，如何量刑？", [(XF, "第二百三十四条")], ["law", "criminal", "factual", "easy"], False),
+    ("xingfa_002", "盗窃公私财物数额较大的，如何处罚？", [(XF, "第二百六十四条")], ["law", "criminal", "factual", "easy"], False),
+    ("xingfa_003", "正当防卫造成不法侵害人损害的情形，负刑事责任吗？", [(XF, "第二十条")], ["law", "criminal", "factual", "medium"], False),
+    ("xingfa_004", "诈骗公私财物数额较大的，如何量刑？", [(XF, "第二百六十六条")], ["law", "criminal", "factual", "easy"], False),
+    # —— 刑事诉讼法 ——
+    ("susong_001", "刑事案件的侦查、提起公诉、审判分别由哪些机关负责？", [(XSSF, "第三条")], ["law", "criminal", "factual", "medium"], False),
+    ("susong_002", "可以用于证明案件事实的材料有哪些？", [(XSSF, "第五十条")], ["law", "criminal", "factual", "medium"], False),
+    ("susong_003", "侦查人员对与犯罪有关的场所、物品、人身、尸体应当如何处理？", [(XSSF, "第一百二十八条")], ["law", "criminal", "factual", "medium"], False),
+    ("susong_004", "逮捕犯罪嫌疑人、被告人的条件是什么？", [(XSSF, "第八十一条")], ["law", "criminal", "factual", "medium"], False),
+    # —— 知识库外严格拒答 ——
     ("refuse_002", "结婚的法定年龄是多少岁？", [], ["law", "refusal", "out_of_scope", "expected_refusal"], True),
     ("refuse_003", "法定继承的第一顺序继承人有哪些？", [], ["law", "refusal", "out_of_scope", "expected_refusal"], True),
     ("refuse_004", "专利侵权损害赔偿数额如何确定？", [], ["law", "refusal", "out_of_scope", "expected_refusal"], True),
