@@ -145,7 +145,9 @@ def test_retention_keeps_latest_completed_backups(tmp_path):
         )
 
     completed = sorted(path.name for path in root.glob("kb_*") if path.is_dir())
-    assert completed == ["kb_20260817_080001", "kb_20260817_080002"]
+    # 目录名用 UTC 渲染，所以这里就是 start 的 UTC 值，不随跑测试的机器时区变化。
+    # 之前写成 0800xx 是因为作者机器在 Asia/Shanghai，CI（UTC）上必挂。
+    assert completed == ["kb_20260817_000001", "kb_20260817_000002"]
 
 
 def test_restore_preserves_previous_data_as_rollback(tmp_path):

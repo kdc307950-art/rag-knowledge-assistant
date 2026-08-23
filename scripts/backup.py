@@ -194,7 +194,13 @@ def _record_verification(backup_dir: Path, result: dict[str, object], reason: st
 
 
 def _next_backup_name(backup_root: Path, now: datetime) -> str:
-    base = "kb_" + now.astimezone().strftime("%Y%m%d_%H%M%S")
+    # 目录名一律用 UTC，不用本地时区。三个理由：
+    # 1. _remove_old_backups 按目录名字典序删旧，本地时区渲染会让字典序不等于时间序
+    #    （容器默认 UTC、宿主机 Asia/Shanghai，两边写同一个备份根目录就会错乱，
+    #    可能删掉最新的那份）；
+    # 2. manifest 里的 created_at 本来就是 UTC，名字用本地时间等于同一件事有两个说法；
+    # 3. 测试和运维脚本才能在任何机器上给出同样的结果。
+    base = "kb_" + now.astimezone(timezone.utc).strftime("%Y%m%d_%H%M%S")
     candidate = base
     suffix = 1
     while (backup_root / candidate).exists() or any(
@@ -385,7 +391,8 @@ def restore_backup(
     try:
         shutil.copytree(backup_dir / "data", stage)
         if data_dir.exists():
-            stamp = (now or _utc_now()).astimezone().strftime("%Y%m%d_%H%M%S")
+            # 同 _next_backup_name：回滚目录名也用 UTC，保持全项目一个时间基准。
+            stamp = (now or _utc_now()).astimezone(timezone.utc).strftime("%Y%m%d_%H%M%S")
             rollback = data_dir.parent / f"{data_dir.name}.pre-restore-{stamp}"
             if rollback.exists():
                 raise BackupError(f"Rollback directory already exists: {rollback}")
