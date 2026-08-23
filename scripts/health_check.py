@@ -229,7 +229,7 @@ def _duration_ms(record: dict[str, Any], name: str) -> float | None:
     if value is None and name == "total_ms":
         # Older access records only exposed duration_ms at the top level.
         value = record.get("duration_ms")
-    if isinstance(value, bool):
+    if isinstance(value, bool) or value is None:
         return None
     try:
         parsed = float(value)

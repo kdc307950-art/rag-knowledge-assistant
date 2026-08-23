@@ -1,5 +1,7 @@
 # 企业知识库智能助手
 
+[![CI](https://github.com/kdc307950-art/rag-knowledge-assistant/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kdc307950-art/rag-knowledge-assistant/actions/workflows/ci.yml)
+
 > 文档版本：`0.1`
 > 适用应用版本：`0.1.0`
 > 最近核对：`2026-08-21`

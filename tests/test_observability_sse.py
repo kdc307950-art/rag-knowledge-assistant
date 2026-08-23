@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import contextmanager
 import threading
+from typing import Any
 
 import pytest
 
@@ -26,7 +27,7 @@ def test_producer_marks_successful_terminal(monkeypatch):
         "mark_sse_terminal",
         lambda terminal, code=None: terminals.append((terminal, code)),
     )
-    emitted: list[tuple[str, object]] = []
+    emitted: list[tuple[str, Any]] = []
     producer = chat._make_producer(lambda: iter(["A"]), lambda: {"sources": []})
 
     producer(lambda kind, payload: emitted.append((kind, payload)), threading.Event())
@@ -48,7 +49,7 @@ def test_producer_marks_business_error_terminal(monkeypatch):
         raise RuntimeError("upstream failed")
         yield "unreachable"
 
-    emitted: list[tuple[str, object]] = []
+    emitted: list[tuple[str, Any]] = []
     producer = chat._make_producer(failing_iterator, lambda: {"sources": []})
     producer(lambda kind, payload: emitted.append((kind, payload)), threading.Event())
 
@@ -66,7 +67,7 @@ def test_producer_marks_interruption_when_stop_requested(monkeypatch):
     )
     stop_event = threading.Event()
     stop_event.set()
-    emitted: list[tuple[str, object]] = []
+    emitted: list[tuple[str, Any]] = []
     producer = chat._make_producer(lambda: iter(["late"]), lambda: {"sources": []})
 
     producer(lambda kind, payload: emitted.append((kind, payload)), stop_event)

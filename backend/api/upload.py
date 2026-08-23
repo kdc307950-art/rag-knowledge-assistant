@@ -120,7 +120,11 @@ async def upload(
 
 
 @router.get("/tasks/{task_id}")
-async def get_task(task_id: str, request: Request = None):
+# 这里必须是裸 Request 而不是 Request | None：FastAPI 只对「注解恰好是 Request 类」
+# 的形参做特殊处理，写成联合类型就会被当作普通请求体字段丢给 pydantic，
+# 路由注册阶段直接抛 FastAPIError。默认值 None 是为了让测试能直接调用本函数，
+# 函数体内已有 request is not None 分支，运行时安全。
+async def get_task(task_id: str, request: Request = None):  # pyright: ignore[reportArgumentType]
     """查询单个后台入库任务快照。"""
     service = DocumentService()
     # React 轮询是当前唯一常规入口；在读取快照时顺便

@@ -1,7 +1,7 @@
 # 进程内临时状态：保留给未迁移的服务辅助逻辑，不承载 HTTP 会话。
 import copy
 import threading
-from typing import Protocol
+from typing import Any, Protocol
 
 # 所有会话级状态集中初始化，避免组件首次访问时出现缺失键异常。
 _STATE_DEFAULTS = {
@@ -30,9 +30,11 @@ class SessionStore(Protocol):
 
     def init_state(self) -> None: ...
 
-    def get_state(self, key: str, default=None): ...
+    # 必须显式标注 -> Any：协议方法体是 `...`，不标注会被推断成返回 None，
+    # 调用方（如 ChatService）拿到的每个状态值都会被当成 None。
+    def get_state(self, key: str, default: Any = None) -> Any: ...
 
-    def set_state(self, key: str, value) -> None: ...
+    def set_state(self, key: str, value: Any) -> None: ...
 
     def clear_chat(self) -> None: ...
 
@@ -88,7 +90,7 @@ def init_state():
     _store.init_state()
 
 
-def get_state(key, default=None):
+def get_state(key: str, default: Any = None) -> Any:
     """安全获取状态。"""
     return _store.get_state(key, default)
 

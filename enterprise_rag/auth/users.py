@@ -10,7 +10,7 @@ import secrets
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 SCRYPT_PARAMS = {"n": 2**14, "r": 8, "p": 1}
@@ -119,7 +119,9 @@ class UserStore:
                     now,
                 ),
             )
-            user_id = int(cursor.lastrowid)
+            # typeshed 把 lastrowid 标成 int | None（非 INSERT 时为 None），
+            # 紧跟 INSERT 之后必定有值，用 cast 说明这一点，不改变运行时行为。
+            user_id = cast(int, cursor.lastrowid)
         return self.get_user(user_id) or {}
 
     def get_user(self, user_id: int) -> dict[str, Any] | None:

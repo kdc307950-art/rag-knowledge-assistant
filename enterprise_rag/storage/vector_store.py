@@ -7,6 +7,7 @@ import logging
 import threading
 import time
 import uuid
+from typing import Any
 
 import chromadb
 
@@ -529,8 +530,10 @@ def add_document_to_kb(
                 metadata=combined_metadata,
             )
             active_metas = []
-            for metadata in list(staged.get("metadatas") or []):
-                updated = dict(metadata or {})
+            # 不复用上面的 metadata 名字：那个是本函数自建的 dict，这里是 chroma
+            # 读回来的 Metadata，同名会让类型和阅读都对不上。
+            for staged_metadata in list(staged.get("metadatas") or []):
+                updated = dict(staged_metadata or {})
                 updated["ingest_state"] = "active"
                 active_metas.append(updated)
             try:
@@ -801,7 +804,11 @@ def search(
                 where=where,
                 include=["documents", "metadatas", "distances"],
             )
-            results["_kb_generation"] = snapshot.generation
+            # QueryResult 是 chroma 定义的 TypedDict，没有 _kb_generation 这个键。
+            # 运行时它就是普通 dict，附带代际是本项目刻意的扩展：调用方靠它判断
+            # 本次检索对应哪一版知识库。要消掉这个 ignore 就得改成自定义返回结构，
+            # 会波及全部调用方，暂不做。
+            results["_kb_generation"] = snapshot.generation  # pyright: ignore[reportGeneralTypeIssues]
             return results
 
 
@@ -813,7 +820,9 @@ def hybrid_search_wrapper(
     access_context: dict | None = None,
 ):
     if not _use_hybrid:
-        search_kwargs = {"n_results": n_results}
+        # 显式标注：否则从初始值推断成 dict[str, int]，后面塞 retrieval_policy /
+        # access_context 会报类型冲突，并沿 **kwargs 级联到 search 的每个形参。
+        search_kwargs: dict[str, Any] = {"n_results": n_results}
         if retrieval_policy is not None:
             search_kwargs["retrieval_policy"] = retrieval_policy
         if access_context is not None:

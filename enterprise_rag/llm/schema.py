@@ -5,6 +5,6 @@ from typing import Optional, List, Dict, Any
 @dataclass
 class AIResponse:
     content: str
-    sources: List[str] = None
+    sources: Optional[List[str]] = None
     thought: Optional[str] = None
-    metadata: Dict[str, Any] = None
+    metadata: Optional[Dict[str, Any]] = None

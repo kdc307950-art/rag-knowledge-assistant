@@ -703,6 +703,7 @@ def test_entity_detail_uses_unseen_blocks_and_warns_for_spoilers(monkeypatch, tm
 
     service = entity_service.EntityConversationService()
     plan = service.plan("帮我详细介绍一下")
+    assert plan is not None
     output = "".join(service.answer_stream("帮我详细介绍一下", plan))
 
     assert plan.intent == "detail"
@@ -719,6 +720,7 @@ def test_entity_detail_uses_unseen_blocks_and_warns_for_spoilers(monkeypatch, tm
 def test_entity_specific_question_prioritizes_entity_relation_blocks(monkeypatch, tmp_path):
     entity_service = _write_entity_store(monkeypatch, tmp_path)
     entity = entity_service.find_entity("程心和罗辑的区别")
+    assert entity is not None
     relation = next(block for block in entity.blocks if block.level == "relation")
     monkeypatch.setattr(entity_service, "rank_blocks", lambda *_args, **_kwargs: (relation,))
 

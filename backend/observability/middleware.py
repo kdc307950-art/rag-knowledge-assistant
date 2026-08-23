@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from collections.abc import Mapping
+from typing import Any
 from uuid import uuid4
 
 from enterprise_rag.utils.logger import log_access_event
@@ -39,7 +41,7 @@ _SAFE_TEMPLATE_FALLBACKS = (
 )
 
 
-def route_label(scope: dict) -> str:
+def route_label(scope: Mapping[str, Any]) -> str:
     """Return a bounded route template, never a raw user-controlled path."""
 
     route = scope.get("route")
@@ -232,7 +234,9 @@ class ObservabilityMiddleware:
                 else "error"
                 if request_failed
                 else telemetry.sse_terminal
-                if is_sse
+                # sse_terminal 可能为 None（流结束时没标终态）。不加这个判断的话
+                # outcome 会是 None，渲染成指标标签就变成字面量 "None"。
+                if is_sse and telemetry.sse_terminal is not None
                 else "error"
                 if telemetry.status >= 400
                 else "ok"

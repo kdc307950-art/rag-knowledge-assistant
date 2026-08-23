@@ -87,7 +87,7 @@ def approve(application: dict[str, Any], *, role: str, actor: str, evidence_refs
         raise GovernanceWorkflowError("role 只能是 hr 或 legal")
     if not refs:
         raise GovernanceWorkflowError("审批必须提供 evidence_refs")
-    expected_role = {"pending_hr": "hr", "pending_legal": "legal"}.get(application.get("stage"))
+    expected_role = {"pending_hr": "hr", "pending_legal": "legal"}.get(application.get("stage") or "")
     if expected_role != role:
         raise GovernanceWorkflowError(
             f"当前阶段 {application.get('stage')} 不接受 {role} 审批"

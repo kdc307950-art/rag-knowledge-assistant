@@ -172,9 +172,20 @@ def test_shipped_governance_config_matches_documented_policy():
     documents = payload["documents"]
     assert documents, "生产治理配置不应为空"
     for source, metadata in documents.items():
-        assert metadata["authority_level"] == "reference", source
+        # 现行语料是 9 部法律法规，全部 authoritative——与员工手册时代不同，
+        # 每一部都有可追溯的发布机关、批准文号和官方来源 URL。
+        # 依据：docs/law-firm-landing.md「全部 authoritative，附带 control 证据包」。
+        assert metadata["authority_level"] == "authoritative", source
         assert metadata["retrieval_status"] == "active", source
-        assert "supersedes" not in metadata, f"{source} 并行有效，不应存在替代关系"
+        # authoritative 不是标一个字段就成立的，证据包必须真的填了。
+        control = metadata.get("control") or {}
+        assert control.get("issuing_department"), f"{source} 缺发布机关"
+        assert control.get("approval_reference"), f"{source} 缺批准文号"
+        assert control.get("evidence_refs"), f"{source} 缺官方来源 URL"
+        assert metadata.get("effective_from"), f"{source} 缺施行日期"
+        # 语义没变：这些法律并行有效，谁也不替代谁。变的只是配置从「不写这个键」
+        # 改成「写成空数组」，所以断言从 key not in 改成取值为空。
+        assert not metadata.get("supersedes"), f"{source} 并行有效，不应存在替代关系"
 
 
 def test_authoritative_state_requires_auditable_control_package(tmp_path):

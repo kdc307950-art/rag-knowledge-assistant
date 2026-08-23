@@ -15,14 +15,17 @@ from enterprise_rag.core.exceptions import (
 from .reranker import get_reranker
 from .query_expansion import expand_query
 import logging
+from typing import Any
 
 try:
     from backend.observability.context import timed_stage
 except Exception:  # pragma: no cover - core package can run without the API
-    from contextlib import nullcontext
+    from contextlib import contextmanager
 
-    def timed_stage(_name):
-        return nullcontext()
+    # 同 rag_service：装饰器和形参名都要与真实实现一致，否则两个分支类型对不上。
+    @contextmanager
+    def timed_stage(name: str):
+        yield
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +38,19 @@ def calculate_rerank_threshold(_scores) -> float:
 
 def retrieve_context(
     query: str,
-    n_results: int = None,
-    top_k: int = None,
+    n_results: int | None = None,
+    top_k: int | None = None,
     return_raw: bool = False,
     return_generation: bool = False,
     retrieval_policy: str | None = None,
     access_context: dict | None = None,
-):
-    """召回并重排候选片段，可同时返回本次检索对应的知识库代际。"""
+) -> tuple[Any, ...]:
+    """召回并重排候选片段，可同时返回本次检索对应的知识库代际。
+
+    返回元组的长度由 ``return_raw`` / ``return_generation`` 决定（2 到 4 元），
+    因此只能标注成变长元组。想要精确类型需要改成返回固定结构的 dataclass，
+    那是一次会波及全部调用方的重构，不在当前范围内。
+    """
     # 第一阶段召回候选分块，第二阶段交由重排器筛选可靠上下文。
     if n_results is None:
         n_results = INITIAL_RETRIEVAL_K
@@ -55,21 +63,22 @@ def retrieve_context(
     try:
         with timed_stage("retrieval"):
             search_func = get_search_function()
-            if retrieval_policy is None and access_context is None:
-                results = search_func(expanded_query, n_results=n_results)
-            else:
-                results = search_func(
-                    expanded_query,
-                    n_results=n_results,
-                    **({"retrieval_policy": retrieval_policy} if retrieval_policy is not None else {}),
-                    **({"access_context": access_context} if access_context is not None else {}),
-                )
+            # 逐键累加而不是 **({...} if ...)：后者会被推断成值类型互斥的
+            # 字典并集，展开后每个形参都报类型冲突。行为完全等价。
+            search_kwargs: dict[str, Any] = {"n_results": n_results}
+            if retrieval_policy is not None:
+                search_kwargs["retrieval_policy"] = retrieval_policy
+            if access_context is not None:
+                search_kwargs["access_context"] = access_context
+            results = search_func(expanded_query, **search_kwargs)
         kb_generation = results.get("_kb_generation")
         documents = results.get("documents") or []
         metadatas = results.get("metadatas") or []
         all_distances = results.get("distances") or []
-        docs = documents[0] if documents and isinstance(documents[0], list) else documents
-        metas = metadatas[0] if metadatas and isinstance(metadatas[0], list) else metadatas
+        # 显式 list[Any]：chroma 返回嵌套一层（每个 query 一个列表），而测试替身
+        # 返回扁平列表，这里靠 isinstance 兼容两种形状，类型上只能是 Any。
+        docs: list[Any] = documents[0] if documents and isinstance(documents[0], list) else documents
+        metas: list[Any] = metadatas[0] if metadatas and isinstance(metadatas[0], list) else metadatas
         distances = (
             all_distances[0]
             if all_distances and isinstance(all_distances[0], list)
