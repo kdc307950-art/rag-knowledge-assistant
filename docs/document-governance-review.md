@@ -1,51 +1,68 @@
-# 员工手册治理复核记录
+# 文档治理复核记录
 
-> 文档版本：`0.1`
+> 文档版本：`0.2`
 > 适用应用版本：`0.1.0`
-> 最近核对：`2026-08-21`
+> 最近核对：`2026-08-23`
 
-初次复核：2026-08-18
-结论更新：2026-08-19（负责人确认发布主体与生效日期）
+本记录说明 `config/document_governance.json` 中每条 `authority_level` / `retrieval_status` 背后的**人工依据**。配置本身是唯一事实源（见 [文档中心](README.md) 的「唯一事实源」表），本文只解释结论，不复制字段值；两处冲突时以配置为准并视为缺陷。
 
-## 初次复核（2026-08-18）已核验事实
+本次复核：2026-08-23（法律语料）
+上一次复核：2026-08-18 / 08-19（员工手册语料，已随语料下线而废止，见文末「变更历史」）
 
-- `2025版新劳动合同法下的企业员工手册.md` 文件存在，正文未出现发布日期、发布部门、批准人、公告编号、生效日期或废止条款。
-- `企业员工手册（2025版）.md` 文件存在，正文未出现发布日期、发布部门、批准人、公告编号、生效日期或废止条款。
-- 两个文件名均包含“2025版”，文件名不能证明版本先后或替代关系。
-- 两份正文都描述面向全体员工，因此 ACL 暂按 `classification=policy`、`visibility=all` 处理；未证实发布部门时使用中性 `department=general`。
+## 复核对象
 
-当时的结论是生效关系 **未证实**，配置保持 `default_retrieval_policy=unresolved`，普通问答安全拒答。
+`corpus/` 现行 9 部法律法规，逐部登记在 `config/document_governance.json` 的 `documents` 中：
 
-## 当前结论（2026-08-19 起生效）
+民法典合同编、民法典合同编通则司法解释、公司法、劳动合同法、刑法、刑事诉讼法、行政处罚法、行政复议法、刑诉法解释。
 
-负责人补充确认了初次复核缺失的事实：
+## 已核验事实（2026-08-23）
 
-1. 两份手册均由 HR / 人力资源部发布；
-2. 均自 2025-01-01 起正式生效；
-3. 二者**互补并行、各有侧重，不存在主从替代关系**；
-4. 手册 2 中的 `[公司名]`/`[地址]`/`[省]` 等占位符是有意保留的脱敏处理，不影响文档有效性。
+1. 9 部文档在 `config/document_governance.json` 中的 `control` 证据包**全部填满**：`issuing_department`、`approver`、`approval_reference`、`notice_reference`、`replacement_decision`、`conflict_priority`、`evidence_refs` 无一为空。
+2. 9 部文档分属 **9 个互不相同的 `document_family`**，每个 family 内只有一个来源。
+3. `evidence_refs` 均为官方发布渠道的公开 URL（中国人大网、最高人民法院官网、税务总局政策法规库等），审计人员可独立定位原文，不依赖本仓库。
+4. 运行时知识库 `data/kb_manifest.sqlite3` 的 `source_metadata` 中，9 个 source 实际落地的 `authority_level` 均为 `authoritative`、`retrieval_status` 均为 `active`，与配置一致——治理字段确实生效，不是只写在配置里。
+5. 9 部文档的 `effective_to` 均为 `null`、`supersedes` 均为空、`replacement_decision` 均为 `does_not_replace`：现行版本并行有效，本批语料内部不存在替代关系。
 
-据此：
+## 当前结论
 
-- 生效关系：**已确认**。两份手册同时有效。
-- `authority_level` 定为 `reference`：生效关系已确认、可正常检索，但因为同属 `employee_handbook` family 且无唯一权威，**不满足 `authoritative` 的条件**。
-- `default_retrieval_policy` 由 `unresolved` 改为 `all_active`，普通知识库问答现可正常检索两份手册。
-- 两份文档均**未**标记为 `superseded` / `archived`——没有替代关系就不得制造替代关系。
+- `authority_level`：全部 **`authoritative`**。
+- `retrieval_status`：全部 **`active`**。
+- `default_retrieval_policy`：保持 **`all_active`**。
 
-配置落点见 `config/document_governance.json`；该文件的 `notes` 字段保存同一结论，两处必须一致。
+### 为什么这批语料能定 `authoritative`，而上一批（员工手册）不能
+
+对照 [文档治理证据模板](document-control-evidence-template.md) 的两条硬性复核项：
+
+| 复核项 | 员工手册（2026-08 已下线） | 现行法律语料 |
+| --- | --- | --- |
+| 同一 `document_family` 仅一个 `authoritative` + `active` 来源 | ❌ 两份手册共用 `employee_handbook` family，互补并行、无主从 | ✅ 9 部各占一个 family，family 内唯一 |
+| `control.evidence_refs` 可被审计人员定位 | ❌ 正文无发布日期、发布部门、批准人、公告编号，仅有负责人口头补充确认 | ✅ 发布机关 + 批准文号（主席令 / 法释号）+ 官方来源 URL |
+
+差别不在于「法律比手册重要」，而在于**证据是否可追溯到本仓库之外**。上一批语料卡在 `reference` 是证据不足的正确结果，不是评级偏严。
+
+### 为什么 `default_retrieval_policy` 不切到 `authoritative`
+
+当前 9 部文档全是 `authoritative` + `active`，两种策略的检索结果**完全相同**，切换没有即期收益，但会带来一处耦合：`load_governance` 在 `default_retrieval_policy=authoritative` 时会拒绝加载任何 `active` + `reference` 条目（见 `tests/test_document_governance.py::test_authoritative_policy_rejects_active_reference_sources`）。一旦切过去，将来纳入律所私有语料（合同模板、办案 SOP 等天然只能是 `reference`）就会变成「加一份参考资料必须同时改全局策略」。
+
+保持 `all_active` 是本次复核给出的判断，不是历史决策的延续；改动前请连同上述耦合一并评估。
 
 ## 仍未取得、因而仍受限的部分
 
-`reference` 不等于 `authoritative`。以下能力在拿到完整证据包之前不可用：
+1. **法律的修订与废止未做版本管理**。当前 9 部的 `effective_to` 全为空、`supersedes` 全为空，等于系统认定「这些版本永久有效」。法律实际会被修正、修订、废止（例如公司法 2023 修订替代 2018 修正），届时必须由人工把旧版本置为 `superseded` + `archived` 并写入新版本的 `supersedes`——系统不会自己发现法律变了，也没有到期提醒。
+2. **条文冲突不做自动裁决**。`conflict_priority` 是给人看的说明文本，不参与检索排序。新法优于旧法、特别法优于一般法这类效力规则未在代码中实现。
+3. **`evidence_refs` 的可用性未做定期巡检**。链接失效不会触发任何告警。
 
-- 条款冲突时的**自动优先级裁决**。当前两份手册地位对等，系统不会替业务方选择口径。
-- `default_retrieval_policy=authoritative` 收紧策略（会因为不存在 `authoritative` 来源而检索为空）。
+## 变更流程
 
-升级为 `authoritative` 需要至少一份可追溯材料（制度正文签发页、审批单、全员公告或 HR/法务正式通知），并明确：
+新增或调整语料的治理字段时：
 
-1. 发布部门与批准人；
-2. 版本号和生效日期；
-3. 是否废止另一份手册；
-4. 冲突条款的优先级及适用员工范围。
+1. 按 [文档治理证据模板](document-control-evidence-template.md) 填写证据包；
+2. `uv run python scripts/sync_document_governance.py` 预览，复核无误后 `--apply`；
+3. 重建检索基线并记录 `document_governance_sha256`；
+4. 同一提交内更新本记录与 `config/document_governance.json` 的 `notes`。
 
-拿到证据后，按 [document-control-evidence-template.md](document-control-evidence-template.md) 填写证据包，使用 `scripts/sync_document_governance.py --apply` 同步治理字段，再重建黄金集基线。
+## 变更历史
+
+- **2026-08-23**：语料由员工手册整体替换为 9 部法律法规（提交 `f4edb4d` → `4f6b566`），全部复核为 `authoritative`。**2026-08-18 / 08-19 针对两份员工手册的复核结论随语料下线一并废止**，不再适用于任何现行文档；其历史版本可在本文件的 Git 历史中查阅。
+- **2026-08-19**：员工手册生效关系经负责人确认，`authority_level` 定为 `reference`，`default_retrieval_policy` 由 `unresolved` 改为 `all_active`。（已废止）
+- **2026-08-18**：员工手册初次复核，生效关系未证实，配置保持 `unresolved`，普通问答安全拒答。（已废止）

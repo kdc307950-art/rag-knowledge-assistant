@@ -283,9 +283,10 @@
     }
   },
   "notes": [
-    "2026-08-19 经负责人确认：两份手册均由 HR / 人力资源部发布，2025-01-01 起正式生效，互补并行各有侧重。",
-    "手册2中的 [公司名]/[地址]/[省] 等占位符为故意保留的脱敏/示范处理，不影响文档有效性。",
-    "authority_level=reference：两份手册同属 employee_handbook family，互补并行、无主从替代关系，不满足 authoritative（唯一权威）条件；升为 authoritative 需另行提供 control 证据包（issuing_department、approver、approval_reference 等）。",
-    "default_retrieval_policy 由 unresolved 改为 all_active，普通知识库问答现可正常检索两份手册。"
+    "2026-08-23 复核：现行语料为 9 部法律法规，全部定为 authority_level=authoritative + retrieval_status=active。依据是每部各占一个 document_family（family 内唯一权威），且 control 证据包填有可追溯到官方发布渠道的发布机关、批准文号和来源 URL。",
+    "default_retrieval_policy 保持 all_active 而非 authoritative：当前两者检索结果相同，但切到 authoritative 后 load_governance 会拒绝加载任何 active+reference 条目，将来纳入律所私有语料（合同模板、办案 SOP）会被迫同时改全局策略。",
+    "9 部法律的 effective_to 与 supersedes 均为空，表示现行版本并行有效；法律被修订或废止时必须人工把旧版本置为 superseded+archived 并写入新版本的 supersedes，系统不会自动发现。",
+    "2026-08-18 / 08-19 针对两份员工手册的复核结论（authority_level=reference）已随该批语料下线而废止，不适用于任何现行文档。",
+    "人工依据的完整说明见 docs/document-governance-review.md；该文档与本 notes 必须在同一提交内保持一致。"
   ]
 }
