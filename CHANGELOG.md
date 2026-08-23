@@ -11,6 +11,7 @@
 - 统一默认 LLM 配置口径，以 `enterprise_rag/config.py` 为准。
 - 将 Windows 反向代理明确为非生产参考，生产拓扑统一为 Linux Docker Compose + Nginx HTTPS。
 - 补齐当前已有 HTTP/SSE 接口、权限和错误语义。
+- 文档治理复核记录改写为现行 9 部法律语料的复核依据；员工手册时代的 `reference` 结论明确标记废止，`config/document_governance.json` 的 `notes` 同步更新，两处保持一致。
 
 ### Fixed
 

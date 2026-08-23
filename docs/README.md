@@ -1,9 +1,9 @@
 # 文档中心
 
-> 文档版本：`0.1`
+> 文档版本：`0.2`
 > 适用应用版本：`0.1.0`
 > 状态：维护中
-> 最近核对：`2026-08-21`
+> 最近核对：`2026-08-23`
 
 本目录按读者和任务组织。根 `README.md` 是入口，不是配置、API 或生产运行事实源。
 
@@ -52,7 +52,7 @@
 | [API 协议](../backend/API.md) | 当前 HTTP/SSE 接口、权限和错误语义 |
 | [运维契约](ops-contract.md) | SLO、保留期、探针和监控语义 |
 | [文档治理证据模板](document-control-evidence-template.md) | 将业务文档提升为权威来源前的人工证据包 |
-| [文档治理复核](document-governance-review.md) | 当前员工手册生效关系的复核记录 |
+| [文档治理复核](document-governance-review.md) | 现行法律语料权威等级与检索策略的人工复核依据 |
 | [ACL 契约](metadata-acl-contract.md) | 文档元数据与检索前授权规则 |
 | [Groundedness 契约](groundedness-contract.md) | 引用完整性和人工支持性评估边界 |
 | [LLM 价格指南](cost-pricing-guide.md) | 价格表来源和估算限制 |
